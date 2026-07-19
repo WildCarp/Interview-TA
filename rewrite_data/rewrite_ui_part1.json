@@ -1,0 +1,203 @@
+{
+  "ui-001": {
+    "question": "UMG 和 FairyGUI（FGUI）的区别？各自适合什么场景？（FGUI 为 UE5 第三方插件）",
+    "answer": "**UMG（UE5 内置）**：\n- 基于 Slate 框架，蓝图/C++ 双驱动，所见即所得。\n- 优点：和 UE5 生态深度融合、源码开放、可挂 Widget Component 进 3D 场景、材质可定制。\n- 缺点：复杂动效需手动搭、跨项目复用难、深层 Widget 树 Tick 开销不小。\n- 适合：3D 场景内 UI（血条、名牌）、HUD、需要自定义材质的 UI、和 Gameplay 深度交互。\n\n**FairyGUI（FGUI，UE5 第三方插件）**：\n- 独立编辑器，导出包体运行时加载。\n- 优点：动效系统强（时间轴、缓动）、组件复用好、跨引擎（UE5/Unity/Cocos）、编辑器高效。\n- 缺点：需集成插件、和 UE5 原生组件联动弱、调试不如 UMG 直观。\n- 适合：2D 重 UI 手游（卡牌、RPG 大量界面）、动效密集 UI、快速迭代。\n\n**选择**：重 UI 2D 手游 → FGUI；3D 游戏少量 UI、需要材质控制 → UMG；混用：HUD 用 UMG，菜单用 FGUI。\n\n**和 Unity 的对比**：Unity 对应 UGUI（内置）+ FGUI（插件）；UE5 对应 UMG（内置）+ FGUI（插件）。UMG 基于 Slate，UGUI 基于 GameObject+Component。\n\n**面试加分点**：UMG 底层是 Slate C++（编辑器 UI 也用 Slate）；Widget Component 可把 UMG 贴 3D 物体；FGUI 在 UE5 上需手动集成插件（非官方）；UMG 的 Tick 是按 Widget 树遍历，深层级要控制。",
+    "tags": [
+      "UMG",
+      "FGUI",
+      "对比",
+      "UE5"
+    ]
+  },
+  "ui-002": {
+    "question": "UMG Canvas Panel 的作用？为什么 UI 渲染选 Screen（Viewport）还是 Widget Component（3D World Space）？",
+    "answer": "UMG 没有 Unity Canvas 的\"全局根\"概念，所有 UMG Widget 树根节点是 UMG Widget（如 Canvas Panel）。Canvas Panel 负责子 Widget 的绝对定位/锚定布局。\n\n**渲染方式**：\n\n**Screen / Viewport（对应 Unity Screen Space - Overlay）**：\n- `AddToViewport` 把 Widget 直接画到屏幕最上层，无相机。\n- 优点：最简单、永远在最前、性能最好。\n- 缺点：不能后处理、不能 3D 变换、不参与场景 Depth。\n- 适合：HUD、菜单、弹窗。\n\n**Widget Component（对应 Unity World Space Canvas）**：\n- 把 UMG Widget 贴到 3D 场景的 Mesh 平面上，参与场景渲染。\n- 优点：可 3D 变换、自动遮挡、有透视、可后处理。\n- 缺点：性能贵（参与场景渲染、每帧 Render Target）、需调 DPI Scale。\n- 适合：游戏内交互屏（电脑、招牌）、VR UI、世界空间 HUD。\n\n**Render Target 贴图（对应 Unity Screen Space - Camera）**：\n- Widget 渲染到 Render Target，再贴到场景材质上。\n- 适合：监视器画面、反射镜 UI。\n\n性能：AddToViewport 最快，Widget Component 最贵。\n\n**面试加分点**：UMG 没有\"Canvas Root\"强制要求，任意 Widget 都能 AddToViewport；Widget Component 内部用 Render Target + Transparent Material；VR UI 必须用 Widget Component（World Space）；UMG 的 DPI Scale 在 Widget Component 上要手动设。",
+    "tags": [
+      "UMG",
+      "CanvasPanel",
+      "WidgetComponent",
+      "UE5"
+    ]
+  },
+  "ui-003": {
+    "question": "为什么要把 UMG 拆分成多个 Widget Tree / Retainer Box？拆分的原则？",
+    "answer": "UMG Slate 合批规则：**同一 Slate 批次内的 Widget 才合批**。但 Widget 树任意元素变化，整棵树会 Invalidate（重算几何/布局）。\n\n**问题**：一个大 Widget 树（整个界面），任何 UI 变化（血条、计时器）→ 整个界面 Invalidate，CPU 卡。\n\n**拆分原则**：\n\n**1. 静态/动态分离**：静态 UI（背景、标题）一个 Widget；动态 UI（血条、列表项、动画）独立子 Widget。动态变化只 Invalidate 自己的子树。\n\n**2. 频率分离**：高频更新（每帧血条）独立 Widget；低频更新（按钮点击）可共用。\n\n**3. Retainer Box**：UE5 特有，强制把子 Widget 渲染到离屏 Render Target 再贴回，隔离 Invalidate 传播，且能合批成一个 draw call。代价是额外 RT 内存。\n\n**4. 合批 vs Invalidate 权衡**：拆太细 → 每个 Widget 独立合批，draw call 增加；拆太粗 → Invalidate 范围大。平衡：动态部分用 Retainer Box 隔离，静态部分合并。\n\n**和 Unity 的对比**：Unity 拆子 Canvas；UE5 拆子 Widget Blueprint + Retainer Box。Unity 子 Canvas 独立 Rebuild；UE5 Retainer Box 独立 Render Target。\n\n**面试加分点**：Retainer Box 是 UMG 性能优化神器（隔离 + 合批）；UMG 的 Invalidate 比 Unity Rebuild 粒度更细（Slate 按需重算）；深层 Widget 树 Tick 顺序自底向上，要控制深度；用 `SInvalidationPanel`（C++）做更底层缓存。",
+    "tags": [
+      "UMG",
+      "RetainerBox",
+      "Invalidate",
+      "拆分",
+      "UE5"
+    ]
+  },
+  "ui-004": {
+    "question": "图集（Texture Atlas / Paper2D Sprite Atlas）的作用？为什么 UMG UI 必须用图集？",
+    "answer": "**1. 减少 Draw Call**：不同贴图的 UI 不能合批（材质不同）。同图集的 Brush 共享材质 → 合批到一个 draw call。100 个散图 = 100 draw call，1 个图集 = 1 draw call。\n\n**2. 减少内存**：散图各有 mipmap、padding 浪费；图集紧凑打包，内存利用率高；图集可整体压缩（ASTC/BC7）。\n\n**3. 带宽友好**：同图集的 Brush 在 GPU 纹理缓存命中率高，减少纹理切换。\n\n**UE5 做法**：\n- UMG 的 Image Widget 用 Brush（FSlateBrush）引用 Texture2D / Paper2D Sprite。\n- Paper2D Sprite 可配 Atlas（Sprite Sheet），多 Sprite 共享一张 Texture2D。\n- UE5 没有内置的\"运行时自动合图集\"功能，通常编辑时手动打 Atlas 或用 Paper2D。\n- 插件：UI 美术常用 Paper2D Sprite Atlas 或第三方 Dynamic Atlas 插件。\n\n**注意**：图集大小移动 1024/2048，PC 4096；按使用频率/界面分图集；动态加载 UI 用独立图集；图集内 padding 防 mipmap 渗色。UMG Brush 默认关 mipmap。\n\n**和 Unity 的对比**：Unity 有 SpriteAtlas 资源 + Late Binding；UE5 用 Paper2D Sprite Atlas 或手动 Texture2D，无原生 Late Binding，靠 Soft Object Path 异步加载。\n\n**面试加分点**：UMG Brush 的 Tiling 模式（Tile/Stretch）影响图集 Sprite 切边；UE5 的 Paper2D Sprite 支持九宫格；移动端 UMG draw call 控制关键就是图集 + 同材质；可写 Editor Utility 自动合并散图为 Atlas。",
+    "tags": [
+      "图集",
+      "TextureAtlas",
+      "Paper2D",
+      "DrawCall",
+      "UE5"
+    ]
+  },
+  "ui-005": {
+    "question": "UMG UI 的 Overdraw 问题？和 3D 特效 Overdraw 的区别？",
+    "answer": "UI Overdraw：多个 UMG Widget 叠加覆盖同一像素。\n\n**来源**：半透明 UI 面板叠加；背景图 + 文字 + 图标 + 装饰层；全屏特效 UI（渐变、光晕）；多个 Widget 树重叠。\n\n**和 3D 特效区别**：\n- UMG 全是 AlphaBlend，无 Early-Z（透明不写深度）。\n- UI 通常全屏，覆盖每个像素。\n- UI 层数容易多（一个界面 5-10 层）。\n- 移动端 UI Overdraw 是主要 GPU 开销之一。\n\n**检测**：\n- UE5 `ProfileGPU` 看 UI pass 耗时和 overdraw。\n- `r.Slate.AllowSlateOverdraw` 查看过绘制。\n- `stat Slate` 看 UMG 渲染统计。\n- Viewport → Buffer Visualizer → Shader Complexity。\n\n**优化**：\n- 减少不必要层级（合并装饰层）。\n- 静态背景烘焙成一张图（或用 Retainer Box 缓存）。\n- 隐藏不可见 UI（`SetVisibility(Hidden)` 或 `Collapsed`）而非 alpha=0（仍渲染）。\n- 减少全屏渐变/光晕。\n- 移动端 UI overdraw ≤3-4 层，PC ≤6。\n\n**和 Unity 的对比**：Unity 用 Scene 视图 Overdraw 模式 + Frame Debugger；UE5 用 ProfileGPU + Stat Slate。UMG 的 `Collapsed`（不占布局不渲染）比 Unity `SetActive(false)` 粒度更细（保留实例）。\n\n**面试加分点**：UMG 的 `SetVisibility` 有多档（Visible/Collapsed/Hidden/HitTestInvisible/All），Collapsed 省 render+layout；Retainer Box 能把多层静态 UI 烘成一张 RT 降 overdraw；半透明 UI 全屏渐变在移动端是 GPU 杀手。",
+    "tags": [
+      "Overdraw",
+      "UMG",
+      "性能",
+      "移动端",
+      "UE5"
+    ]
+  },
+  "ui-007": {
+    "question": "多分辨率适配怎么做？UMG Anchors、DPI Scale、Safe Zone？",
+    "answer": "**DPI Scale（对应 Unity Canvas Scaler）**：\n- Project Settings → Engine → User Interface → DPI Scale Rule。\n- Scale Rule：常选 `ShortestSide` 或 `LongestSide`。\n- DPI Curve：按最短边分档（如 <1080 缩 1.0，<1440 缩 1.5，<2160 缩 2.0）。\n- 设计基准分辨率（如 1920×1080）作为 1.0 DPI。\n\n**UMG Anchors（锚点）**：\n- 每个 Widget 在其 Slot 里设 Anchors（9 宫格 + 拉伸模式）。\n- 角落元素 anchor 四角；中心元素 anchor 中心；HUD 边缘元素 anchor 对应边。\n- 正确设锚点避免拉伸变形。\n\n**Safe Zone（对应 Unity SafeArea）**：\n- UMG 内置 SafeZone Widget，自动避开刘海、圆角、手势条。\n- 把 SafeZone 作为根容器，关键 UI 放里面。\n- 背景图可全屏（放 SafeZone 外）。\n\n**适配策略**：\n- DPI Scale + Anchors 适配主流比例。\n- 极端比例（19.5:9、iPad 4:3）用 SafeZone + 动态布局。\n- 横竖屏切换：监听 `OnViewportResized`，重排 UI。\n- 测试覆盖：16:9、18:9、19.5:9、4:3、20:9。\n\n**和 Unity 的对比**：Unity Canvas Scaler + Anchor + Screen.safeArea 脚本；UE5 DPI Scale + UMG Anchors + SafeZone Widget（内置，无需写脚本）。\n\n**面试加分点**：UE5 的 SafeZone 是原生 Widget，不用手写；DPI Scale Rule 选 `ShortestSide` 适配横竖屏都稳；`GetViewportSize`/`GetViewportScale` 运行时查询；Anchors 的拉伸模式（Stretch）适合全屏背景。",
+    "tags": [
+      "适配",
+      "DPIScale",
+      "SafeZone",
+      "UMG",
+      "UE5"
+    ]
+  },
+  "ui-008": {
+    "question": "UMG Invalidate / Rebuild 是什么？怎么排查 UI Tick / Rebuild 性能问题？",
+    "answer": "Invalidate：UMG Slate 标记 Widget 几何/布局/绘制为脏，下一帧重算。发生在 Widget 变化时（位置、颜色、文本内容、Brush 切换）。\n\n**触发 Invalidate**：\n- 任何 Widget 的 transform/Color/Text 变化。\n- Image Brush 切换。\n- Horizontal/Vertical/Grid Panel 重新布局。\n- 动态字体加新字符（字体纹理重建）。\n\n**问题**：大 Widget 树一次 Invalidate 涉及几千元素，CPU 卡；每帧 Invalidate = 持续卡顿。\n\n**排查**：\n1. UE5 Profiler → Slate 模块，看 `SWidget::Paint` / `Tick` / `Invalidate` 耗时。\n2. `stat Slate` 看每帧 Slate 更新/绘制时间。\n3. `stat UMG` 看 UMG 事件耗时。\n4. ProfileGPU 看 UI draw call。\n5. 用 `SlateInsights`（Slate 跟踪工具）精确定位。\n\n**优化**：\n- 拆 Widget 树（动态部分独立 Blueprint）。\n- 用 Retainer Box 隔离 Invalidate 传播。\n- 避免每帧改 UI（缓存、仅必要时改）。\n- UMG Layout Panel（Horizontal/Vertical/Grid）慎用，复杂列表用 List View。\n- 隐藏 UI 用 `SetVisibility(Collapsed)`（不 Tick 不 Render）而非 alpha=0。\n- 文字内容变化最小化（用 StringBuilder，避免每帧 string 拼接 GC）。\n\n**和 Unity 的对比**：Unity `Canvas.SendWillRenderCanvases` Rebuild；UE5 Slate `Tick` + `Invalidate`。Unity 是整 Canvas Rebuild；UE5 是脏 Widget 局部 Invalidate，粒度更细。\n\n**面试加分点**：UMG 的 `Invalidate(EInvalidateWidgetReason)` 可指定原因（Layout/Paint/...）做细粒度脏标记；Retainer Box 强制隔离；`bCanTick` 关闭不需要 Tick 的 Widget；List View 自带 Entry Widget Pool 避免大量 Item Tick。",
+    "tags": [
+      "Invalidate",
+      "Rebuild",
+      "UMG",
+      "性能",
+      "UE5"
+    ]
+  },
+  "ui-009": {
+    "question": "UMG UI 和 Niagara 粒子叠加的方案？怎么避免 UI 粒子打断合批？",
+    "answer": "问题：Niagara 粒子是场景 Actor，UMG Widget 是 Slate 渲染，两者材质体系不同，叠加时合批被打断。\n\n**方案一：UI 上的 Niagara（UI Particle 插件）**\n- 第三方插件把 Niagara 渲染到 UMG Widget。\n- 粒子和 UI 同 Render Target，可合批。\n- 缺点：需插件、性能略降。\n\n**方案二：分层渲染**\n- UI 用 AddToViewport（Screen），粒子用场景 Niagara。\n- 粒子在场景里渲染，UI 叠在最上。\n- 优点：粒子性能好（GPU 仿真）。\n- 缺点：合批断（不同渲染管线）。\n\n**方案三：UI 特效用 Material（Shader）**\n- 不用粒子，用材质做特效（流光、扫描、溶解、UV 动画）。\n- UMG Image + 特效材质。\n- 同材质合批不中断。\n- 适合简单特效（按钮流光、扫描线）。\n\n**方案四：UI 上叠 Sprite 序列帧**\n- 用 UMG Image 切换 Brush 模拟帧动画（Sprite Sheet）。\n- 合批友好。\n- 适合固定特效。\n\n**选择**：简单特效 → 材质或序列帧；复杂特效 → UI 粒子插件或分层渲染；性能优先 → 分层（接受合批断）。\n\n**和 Unity 的对比**：Unity 用 UIParticle 插件或分层 Canvas；UE5 用 UI Niagara 插件或 AddToViewport + 场景 Niagara。UE5 的 Widget Component 可把粒子放 3D 空间和 UI 遮挡。\n\n**面试加分点**：UMG 材质做流光用 `Time` 节点 + UV 平移；Retainer Box 能把多层 UI + 特效烘成一张 RT 合批；Niagara 可渲染到 Render Target 再贴 UMG Image；打断合批多几个 draw call 不一定是瓶颈，先 Profile 再优化。",
+    "tags": [
+      "UI粒子",
+      "Niagara",
+      "合批",
+      "UMG",
+      "UE5"
+    ]
+  },
+  "ui-010": {
+    "question": "UMG Slate 的 Batching（合批）规则？什么情况会打断合批？",
+    "answer": "合批条件（全部满足）：\n- 同一 Slate 批次（同 Widget 树/同 Retainer Box）。\n- 同一材质（含同 Texture / Atlas）。\n- 同一 Z-Order 层级。\n- 层级相邻（无不同材质的元素穿插）。\n\n**打断合批的因素**：\n\n**1. 不同图集/材质**：Widget 用不同 Texture（非同图集）。\n\n**2. 穿插渲染**：A（材质1）、B（材质2）、C（材质1），合批被 B 打断，A、C 无法合批（要按顺序渲染）。\n\n**3. 不同 Z-Order**：Slot Z-Order 不同不合批。\n\n**4. 不同 Texture**：字体纹理、图集分开。\n\n**5. Mask / Clipping**：UMG 的 Widget Clipping（Clip to Bounds）会打断合批。\n\n**6. Retainer Box 边界**：Retainer Box 内外不合批（独立 RT）。\n\n**7. Material Instance**：不同 MID（Material Instance Dynamic）参数不同视为不同材质，打断合批。\n\n**优化**：\n- Widget 按材质/图集分组排列，减少穿插。\n- 同类 UI（按钮组）用同图集。\n- 避免不必要的 Clipping。\n- 用 ProfileGPU / `stat Slate` 看 draw call 拆分原因。\n- 静态 UI 用 Retainer Box 合并。\n\n**和 Unity 的对比**：Unity 合批看 Canvas + 材质 + SortingLayer；UE5 合批看 Slate 批次 + 材质 + Z-Order。Unity 用 Frame Debugger；UE5 用 ProfileGPU + `stat Slate`。\n\n**面试加分点**：UMG 的 `Z-Order` 在 Slot 里设（不是 SortingLayer）；Retainer Box 是 UE5 合批利器（强合并 + 隔离）；Slate 底层用 Vertex Buffer 批处理；`stat SlateDebug` 看详细 batch 信息；MID 会破坏合批，能用顶点色就用顶点色。",
+    "tags": [
+      "合批",
+      "Batching",
+      "UMG",
+      "Slate",
+      "UE5"
+    ]
+  },
+  "ui-012": {
+    "question": "UMG Shader 用 Material 和 MID（Material Instance Dynamic）的坑？",
+    "answer": "问题：UMG Widget 共享材质才能合批，但有时要 per-element 不同效果（如不同颜色的流光）。\n\n**Material 实例化（MID）**：\n- `CreateDynamicMaterialInstance` 创建 MID → 合批断。\n- 100 个 Widget 各一个 MID = 100 draw call。\n- 不可取。\n\n**MaterialPropertyBlock 在 UE5 的对应**：\n- UE5 有 `ScalarParameterValue` / `VectorParameterValue` on MID，但和 Unity 一样，不同参数的 MID 视为不同材质，打断 Slate 合批。\n- UMG Slate 合批要求同材质实例，MID 破坏合批。\n\n**替代方案**：\n\n**1. 顶点色（Vertex Color）**：\n- UMG Widget 的 Color and Opacity（Tint）是 per-instance，材质里乘顶点色。\n- 不破坏合批。\n- 适合颜色变化。\n\n**2. Brush Tint**：\n- UMG Image 的 Tint 是 per-instance，等价顶点色。\n\n**3. 分组多材质**：\n- 同效果的 Widget 用同材质，分组渲染。\n- 接受 draw call 增加。\n\n**4. 烘焙到贴图**：\n- per-element 效果预烘焙到 sprite，不用 shader。\n\n**5. 全屏后处理式特效**：\n- 整个 UI 渲染后做一次特效（流光扫过），不分 per-element。\n- 用 Post Process Material 或 Retainer Box 后材质。\n\n要点：UMG 要 per-element 效果，优先顶点色/Tint；真要材质参数，接受 draw call 或用 Retainer Box 隔离。\n\n**和 Unity 的对比**：Unity UGUI 不支持 MaterialPropertyBlock（CanvasRenderer 限制）；UE5 UMG MID 破坏合批。两者都推荐用顶点色。\n\n**面试加分点**：UMG 的 Tint 走顶点色通道，免费 per-instance；Retainer Box 内的 Widget 共享一个 RT，可对 RT 整体做材质特效（一次 draw call）；Post Process Material 的 Blending Location 可插入 UI 后处理；能用顶点色就别开 MID。",
+    "tags": [
+      "UIShader",
+      "Material",
+      "MID",
+      "UMG",
+      "UE5"
+    ]
+  },
+  "ui-013": {
+    "question": "UMG 的基本组件有哪些？Image、Text Block、Button、CheckBox 各自的用途？",
+    "answer": "**核心 Widget**：\n- **Canvas Panel**：绝对定位容器（对应 Unity Canvas 的布局功能）。\n- **Panel Widgets**：Horizontal Box / Vertical Box / Grid Panel / Wrap Box / Uniform Grid Panel（对应 Unity Layout Group）。\n- **Image**：显示 Texture/Sprite/Material，支持 Simple/Sliced/Tiled 模式（对应 Unity Image）。\n- **Text Block**：显示文本（对应 Unity Text/TMP）。\n- **Rich Text Block**：富文本（支持样式标记）。\n- **Button**：按钮（对应 Unity Button）。\n- **CheckBox**：开关（对应 Unity Toggle）。\n- **Slider**：滑块（对应 Unity Slider）。\n- **Scroll Box**：滚动区域（对应 Unity ScrollRect）。\n- **Editable Text / EditableTextBox**：输入框（对应 Unity InputField）。\n- **Border**：带边框/背景的容器，可设 Clip（对应 Unity RectMask2D）。\n- **Retainer Box**：渲染子 Widget 到 RT 再贴回（UE5 特有，合批/隔离用）。\n- **Safe Zone**：避开刘海/手势条（对应 Unity SafeArea 脚本）。\n- **Spacer**：占位空白。\n- **Invalidation Box**：缓存 Widget 几何，减少 Invalidate（UE5 特有）。\n\n**Image 模式**：\n- Brush Tiling：None（Simple）/ Horizontal/Vertical/Both（Tiled）。\n- Sliced：九宫格（需 Sprite 设 border）。\n- 对应 Unity Image 的 Simple/Sliced/Tiled/Filled。\n\n**和 Unity 的对比**：Unity 用 GameObject + Component；UE5 用 Widget（UObject，非 Actor）。UMG 的 Panel Widget 同时承担布局 + 容器；Unity 拆成 Layout Group + 容器。\n\n**面试加分点**：UMG 的 Widget 是 Slate 的 UMG 包装层；Invalidation Box 是性能利器（缓存几何）；Retainer Box 做合批和材质特效；Text Block 默认用 Canvas Font，可换 SDF Font。",
+    "tags": [
+      "UMG",
+      "Widget",
+      "组件",
+      "基础",
+      "UE5"
+    ]
+  },
+  "ui-015": {
+    "question": "UMG 的输入事件系统怎么工作？Slate HitTest 怎么优化？",
+    "answer": "UMG 输入：基于 Slate 的输入路由系统。\n\n**工作流程**：\n1. 输入（点击/触摸）→ Slate 获取屏幕坐标。\n2. HitTest：从顶层 Widget 树到底层，对每个 Widget 做命中检测（按 Z-Order 和 Visibility）。\n3. 命中的 Widget 按 Z-Order 排序，最上层接收事件。\n4. 派发事件（On Clicked / On Hovered / On Pressed / On Released）。\n5. 事件可冒泡或拦截（按 Widget 的 Visibility 设置）。\n\n**HitTest 代价**：\n- 每次输入对整棵 Widget 树做检测。\n- Widget 多（上千）→ HitTest 慢。\n- 每帧都跑（即使没输入，Hover 检测）。\n\n**优化**：\n\n**1. Visibility 设置**：\n- `Visible`：可见可交互（参与 HitTest）。\n- `HitTestInvisible`：可见不可交互（不参与 HitTest，省检测）。\n- `SelfHitTestInvisible`：自己不参与，子可参与。\n- `Hidden`/`Collapsed`：不渲染不交互。\n- 纯装饰 Widget（背景图、文字）设 `HitTestInvisible`，可减少 50%+ HitTest。\n\n**2. 减少 Widget 层级**：深层 Widget 树 HitTest 慢，用 Panel Widget 扁平化。\n\n**3. 按需禁用**：非交互状态用 `SetIsEnabled(false)` 或 `SetVisibility(HitTestInvisible)`。\n\n**和 Unity 的对比**：Unity EventSystem + GraphicRaycaster + Raycast Target 勾选；UE5 Slate HitTest + Visibility 多档。Unity 要手动取消 Raycast Target；UE5 用 Visibility 档位控制。\n\n**面试加分点**：UMG 的 `HitTestInvisible` 是 UI 性能优化关键（对应 Unity 取消 Raycast Target）；Slate HitTest 自顶向下按 Z-Order；`On Mouse Enter`/`On Mouse Leave` 做 Hover 反馈；`SetIsEnabled` 整组禁用；深层 Widget 树 Tick + HitTest 都贵，要控制深度。",
+    "tags": [
+      "UMG",
+      "HitTest",
+      "Slate",
+      "输入",
+      "优化",
+      "UE5"
+    ]
+  },
+  "ui-018": {
+    "question": "UMG 的动画方案？UMG Animation、Timeline、Lerp？",
+    "answer": "**UMG Animation（Widget Blueprint 内置）**：\n- Widget Blueprint 的 Animation 面板，时间轴编辑，可视化。\n- 优点：设计师可编辑、支持曲线、可绑定任意 Widget 属性。\n- 缺点：每个动画一个 Track，管理麻烦；播放有开销。\n- 适合：复杂 UI 动画（弹出、过场、状态切换）。\n\n**Timeline（C++ / Blueprint 通用）**：\n- 代码驱动的时间轴，可插值任意值。\n- 优点：灵活、可程序控制。\n- 缺点：每动画一个 Timeline 对象。\n- 适合：程序控制的 UI 动画（弹出、滑动、淡入）。\n\n**Lerp + Tick**：\n- 每帧 `Lerp(a, b, alpha)` 插值，手动设 alpha。\n- 优点：最轻量、可控。\n- 缺点：要手写 Tick 逻辑。\n- 适合：简单程序动画（血条平滑、淡入）。\n\n**选择**：简单程序动画 → Lerp + Tick；设计师做的复杂动画 → UMG Animation；状态切换 → Timeline；FGUI 项目 → FGUI 动效。\n\n注意：UI 动画每帧改 Widget 属性 → Invalidate，控制频率和范围。\n\n**和 Unity 的对比**：Unity DOTween（代码 tween）/ Animation Clip / Animator；UE5 UMG Animation / Timeline / Lerp。UE5 没有原生 DOTween 等价，常用 Timeline + Lerp 或第三方 tween 插件。\n\n**面试加分点**：UMG Animation 的 `PlayAnimation` / `Reverse` / `SetPlaybackSpeed` 灵活控制；Timeline 的 Event Track 可触发自定义事件；Lerp + `FMath::SmoothStep` 缓动；动画期间 Widget 持续 Invalidate，长动画要评估性能；Retainer Box 可缓存动画首帧避免重复计算。",
+    "tags": [
+      "动画",
+      "UMGAnimation",
+      "Timeline",
+      "Lerp",
+      "UE5"
+    ]
+  },
+  "ui-020": {
+    "question": "UMG UI 的 Loading 流程？怎么避免卡顿？",
+    "answer": "卡顿来源：加载 UI Widget Blueprint + 资源（贴图、字体）瞬间内存暴涨；实例化大量 Widget；初始化逻辑（绑定事件、数据填充）。\n\n**优化流程**：\n\n**1. 异步加载**：\n- `LoadObjectAsync` / `StreamableManager` 异步加载资源。\n- `UAssetManager` 的 async load（对应 Unity Addressables）。\n- 资源分帧加载，不一次性。\n- 加载进度条显示。\n\n**2. 预加载**：\n- 常用 UI（HUD）开局加载，常驻内存。\n- 非常用 UI 按需加载，退出卸载。\n\n**3. 分帧实例化**：\n- 大列表分帧创建（每帧 10 项）。\n- 用 Timeline / Tick 分帧。\n- UMG List View 自带分帧实例化（Entry Widget Pool）。\n\n**4. 对象池**：\n- UI Widget 池化（按钮、列表项）。\n- 复用而非新建。\n- List View / Tile View 内置 Entry Widget Pool。\n\n**5. 资源依赖管理**：\n- Pak/Chunk + UAssetManager 管理依赖。\n- 引用计数卸载（避免重复加载/卸载）。\n- `TSoftObjectPtr` / `Soft Object Path` 延迟加载。\n\n**6. Loading 界面**：\n- 加载时显示 Loading 界面（独立 Widget，最简）。\n- 加载完成后切换。\n- 过场动画掩盖加载。\n\n**7. 渐进显示**：\n- UI 出现时分元素淡入（UMG Animation sequence）。\n- 掩盖初始化时间。\n\n注意：移动端内存有限，加载大 UI 前先卸载旧 UI。\n\n**和 Unity 的对比**：Unity `Resources.LoadAsync` / Addressables；UE5 `StreamableManager` / `UAssetManager` / `LoadObjectAsync`。Unity 用协程分帧；UE5 用 Timeline / Tick / Async Task。\n\n**面试加分点**：UMG List View 的 Entry Widget Pool 自动分帧 + 复用；`UAssetManager` 的 `LoadPrimaryAssets` 做分块加载；`SetVisibility(Collapsed)` 隐藏的 Widget 不占渲染；Loading 界面用独立 Root Widget 避免和主 UI 树耦合。",
+    "tags": [
+      "Loading",
+      "卡顿",
+      "异步",
+      "UAssetManager",
+      "UMG",
+      "UE5"
+    ]
+  },
+  "ui-022": {
+    "question": "UMG 的分辨率无关设计？怎么保证不同分辨率显示一致？",
+    "answer": "原则：以设计分辨率为基准，等比缩放，关键元素不被裁剪。\n\n**DPI Scale 配置（对应 Canvas Scaler）**：\n- Project Settings → DPI Scale Rule：`ShortestSide`（推荐）。\n- DPI Curve：设计分辨率（1920×1080）为 1.0，按最短边分档缩放。\n- 横竖屏都稳。\n\n**UMG Anchors 策略**：\n- 角落元素：anchor 四角（stretch 时 top/bottom/left/right=0）。\n- 中心元素：anchor 中心。\n- HUD 边缘元素：anchor 对应边。\n- 全屏背景：anchor 拉伸四角。\n\n**Safe Zone**：\n- 刘海/圆角/手势条区域不放关键 UI。\n- SafeZone Widget 自动适配（内置，无需脚本）。\n\n**极端比例处理**：\n- 19.5:9（长屏）：两侧留黑边或拉伸背景。\n- 4:3（iPad）：上下留黑边或重新布局。\n- 方案：背景全屏拉伸 + UI 元素 anchor 边缘 + SafeZone。\n\n**测试**：\n- Device Profiles 模拟各分辨率。\n- 真机测试覆盖主流比例。\n- 关注：UI 是否被裁、是否留大黑边、文字是否溢出。\n\n**美术规范**：\n- 设计稿按设计分辨率。\n- 字体大小用相对值（UMG 自动 DPI 缩放）。\n- 图标尺寸考虑缩放后可点击（最小 44pt）。\n\n**和 Unity 的对比**：Unity Canvas Scaler + Anchor + Screen.safeArea；UE5 DPI Scale + UMG Anchors + SafeZone Widget。UE5 的 SafeZone 是原生 Widget，不用写脚本。\n\n**面试加分点**：UE5 的 DPI Scale 在 Project Settings 全局配，所有 UMG 自动应用；`GetViewportSize` + `GetViewportScale` 运行时查询；SafeZone 支持平台原生（iOS/Android/Console）；`OnViewportResized` 委托响应分辨率变化。",
+    "tags": [
+      "分辨率",
+      "适配",
+      "DPIScale",
+      "SafeZone",
+      "UMG",
+      "UE5"
+    ]
+  },
+  "ui-023": {
+    "question": "UMG UI 和 3D 场景的交互？点击 3D 物体？",
+    "answer": "**3D 物体点击**：\n\n**1. Line Trace（射线检测）**：\n- 从相机发射射线，检测 Collision。\n- `GetPlayerController->GetHitResultUnderCursor`。\n- 命中物体处理点击。\n- 优点：精确。\n- 缺点：每点击一次 trace，UI 也要先检查。\n\n**2. UE5 Input 事件**：\n- Actor 挂 `OnClicked` / `OnBeginCursorOver` 事件（需组件启用碰撞）。\n- PlayerController 的 `bEnableClickEvents` / `bEnableMouseOverEvents`。\n- 优点：和 UI 统一输入路由。\n- 支持 hover/drag。\n\n**3. UI 拦截**：\n- 点击先到 UMG，UI 命中则不传 3D。\n- `GetHitResultUnderCursor` 先检测 UI（Slate HitTest）。\n- 检查鼠标是否在 UI 上。\n\n**3D HUD（血条、名字）**：\n\n**方案一：Screen Space UMG**：\n- HUD 是 UMG Widget，每帧把 3D 位置投影到屏幕。\n- `PlayerController->ProjectWorldLocationToScreen`。\n- HUD 永远在最前。\n- 缺点：3D 物体被遮挡时 HUD 还显示（需检测遮挡）。\n\n**方案二：Widget Component（对应 World Space Canvas）**：\n- HUD 作为 3D 物体，在场景里。\n- 优点：自动遮挡、有透视。\n- 缺点：性能贵（参与场景渲染）、缩放需调整。\n\n**选择**：大量 HUD → Screen Space UMG + 遮挡检测；少量重要 HUD → Widget Component。\n\n**和 Unity 的对比**：Unity `Physics.Raycast` / `PhysicsRaycaster` + EventSystem；UE5 `Line Trace` / `GetHitResultUnderCursor`。Unity `Camera.WorldToScreenPoint`；UE5 `ProjectWorldLocationToScreen`。\n\n**面试加分点**：UE5 的 Widget Component 支持 World Space + Screen Space 两种；`ProjectWorldLocationToScreen` 配合 Slate HitTest 做 UI 拦截；遮挡检测用 LineTrace 到物体确认无墙挡；大量 HUD 用一个 UMG 容器 + 池化，不要每角色一个 Widget Component。",
+    "tags": [
+      "3D交互",
+      "LineTrace",
+      "HUD",
+      "WidgetComponent",
+      "UE5"
+    ]
+  },
+  "ui-024": {
+    "question": "UMG 的图集打包策略？按什么分？",
+    "answer": "策略原则：**按使用场景分组，平衡合批和内存**。\n\n**分组方式**：\n\n**1. 按界面分**：每个界面（主菜单、背包、商店）独立图集。加载界面时加载图集，退出卸载。优点：内存可控。缺点：跨界面共用素材重复。\n\n**2. 按功能分**：通用 UI（按钮、边框、图标）一个共享图集，常驻。特殊界面素材独立图集。优点：复用、合批好。缺点：共享图集可能大。\n\n**3. 按加载时机分**：启动加载（HUD、主菜单）；按需加载（商店、设置）；临时（活动界面）。\n\n**大小控制**：单图集移动 1024-2048，PC 4096；单 sprite ≤256（移动）；padding 2-4px。\n\n**UE5 做法**：\n- 用 Paper2D Sprite Atlas（编辑时打包）或手动 Texture2D。\n- Pak/Chunk 分包：按界面/功能分包，`UAssetManager` 管理。\n- 共享 UI（按钮、图标）一个 Chunk 常驻。\n- 动态加载 UI 用独立 Chunk（按需加载）。\n\n**优化**：\n- 定期审查图集利用率（没用的 sprite 删除）。\n- 图集合并/拆分根据实际使用调整。\n- 内存紧张时降级图集分辨率（Device Profile 切 LOD）。\n\n**和 Unity 的对比**：Unity 有 SpriteAtlas 资源 + Include in Build + Late Binding + Variant；UE5 用 Paper2D Sprite Atlas 或手动 Texture2D + Pak/Chunk + `TSoftObjectPtr` 异步加载，无原生 Late Binding。\n\n**面试加分点**：UE5 的 Pak/Chunk + UAssetManager 是原生分包方案（对应 Unity Addressables）；`TSoftObjectPtr` / `Soft Object Path` 做延迟加载；Device Profile 按设备分级加载图集；Editor Utility 自动检查图集利用率；Paper2D Sprite 支持九宫格 border。",
+    "tags": [
+      "图集",
+      "打包",
+      "Pak",
+      "Chunk",
+      "UAssetManager",
+      "UE5"
+    ]
+  },
+  "ui-025": {
+    "question": "UMG UI 的性能监控和优化流程？",
+    "answer": "监控工具：\n\n**1. UE5 Profiler**：\n- Slate 模块：`SWidget::Paint` / `Tick` / `Invalidate` 耗时。\n- Render：UI draw call 数、batch 数。\n- Memory：UI 资源内存。\n- `stat Slate` / `stat UMG` 看每帧统计。\n\n**2. ProfileGPU**：\n- 逐 draw call 看 UI 渲染。\n- 找打断合批的原因。\n- 看 UI pass 耗时。\n\n**3. Slate Insights**：\n- Slate 跟踪工具，精确 Widget 级别耗时。\n- 看 Tick / Paint / Invalidate 路径。\n\n**4. 内存 Profiler**：\n- `Memory Report` 命令。\n- 看 UI 资源占用。\n- 找大贴图、未卸载资源。\n- `obj list class=Texture2D` 看贴图。\n\n**优化流程**：\n\n**1. 定位瓶颈**：\n- CPU 卡 → Slate Tick？Invalidate？实例化？\n- GPU 卡 → draw call 多？overdraw 高？\n- 内存高 → 贴图大？图集多？\n\n**2. 针对优化**：\n- Slate Tick：拆 Widget 树、用 Invalidation Box 缓存。\n- Draw Call：合批、图集、减少穿插、Retainer Box。\n- Overdraw：减少层级、`Collapsed` 隐藏。\n- 内存：压缩、裁剪、按需加载。\n\n**3. 测试验证**：真机测试（不只编辑器）；低端机测试；长时间运行（内存泄漏）。\n\n**4. 持续监控**：上线后 telemetry 收集性能数据；定期 review 热点界面。\n\n**和 Unity 的对比**：Unity Profiler UI Module + Frame Debugger + Overdraw 视图；UE5 Profiler Slate + ProfileGPU + Slate Insights + `stat Slate`。\n\n**面试加分点**：`stat Slate` 看每帧 Slate 更新/绘制时间；`stat UMG` 看 UMG 事件；`r.Slate.AllowSlateOverdraw` 查看过绘制；`SlateInsights` 是 UE5 的 UI 性能分析利器；Invalidation Box 缓存 Widget 几何减少 Tick；自动化用 Editor Utility 跑性能回归。",
+    "tags": [
+      "监控",
+      "性能",
+      "Profiler",
+      "UMG",
+      "Slate",
+      "UE5"
+    ]
+  }
+}

@@ -1,0 +1,679 @@
+[
+  {
+    "id": "vfx-001",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子系统的性能瓶颈通常出现在哪些地方？移动端该如何优化？",
+    "answer": "瓶颈三环节：\n\n**1. CPU 侧**：粒子更新（位置/速度积分）、发射器逻辑、托管层开销。大量粒子在主线程逐个 Update 会卡顿。\n\n**2. GPU 侧**：Overdraw（透明叠加）、填充率压力、纹理采样次数。\n\n**3. 带宽**：粒子纹理上传、VBO 重建。\n\n优化手段：\n- 用 GPU 粒子（Compute Shader / DrawProcedural）把更新挪到 GPU。\n- 控制最大粒子数和发射率，做屏幕外剔除/远距离降级。\n- 纹理打 Atlas、小尺寸（移动端单张 ≤256），开 mipmap。\n- 尽量用 AlphaTest/Additive 而非纯 AlphaBlend，减少 overdraw 层。\n- 移动端关掉或简化粒子光照、阴影投射。\n- LOD：远距离切低发射率/低分辨率贴图/无光照版本。\n- 合批：相同材质的粒子合并到一个 draw call（ParticleSystem 的 batching）。",
+    "tags": [
+      "粒子",
+      "性能",
+      "移动端"
+    ]
+  },
+  {
+    "id": "vfx-002",
+    "category": "vfx",
+    "difficulty": "初级",
+    "question": "Overdraw 是什么？为什么移动端特别危险？如何检测和控制？",
+    "answer": "Overdraw = 同一像素被多个片元覆盖并写入的次数。透明物体（Additive/AlphaBlend）是主要来源，因为不能 Early-Z 剔除。\n\n**移动端危险原因**：\n- 移动 GPU 填充率有限（带宽和 ALU 紧张）。\n- TBR/TBDR 架构下，高 overdraw 撑爆 Tile 缓存，导致显存往返（tile resolve），带宽暴涨、发热、掉帧。\n- Thermal throttling 进一步降频。\n\n**检测**：\n- UE5：Scene 视图 Display Mode → Overdraw；Frame Debugger 看透明 pass 数量。\n- RenderDoc / Snapdragon Profiler / Xcode GPU Capture 看每像素覆盖。\n\n**控制**：\n- 设 overdraw 层预算（移动 ≤3、PC ≤6）。\n- 优先 AlphaTest（可 Early-Z），慎用纯 AlphaBlend。\n- 粒子做 alpha clip，硬边而非全屏柔化。\n- 减少全屏后处理叠加层数。\n- 远距离剔除特效。",
+    "tags": [
+      "Overdraw",
+      "移动端",
+      "TBR"
+    ]
+  },
+  {
+    "id": "vfx-003",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "GPU Instancing、Graphics.DrawMesh、DrawMeshInstancedIndirect 的区别和适用场景？",
+    "answer": "**GPU Instancing**：\n- 一次 draw call 绘制大量相同网格+材质的对象（草、树、石头）。\n- 通过 instanced 属性数组传 per-instance 数据。\n- 要求材质开启 Enable GPU Instancing，shader 支持 UNITY_SETUP_INSTANCE_ID。\n- 适合静态重复几何体。\n\n**Graphics.DrawMeshInstanced**：\n- 脚本端直接提交，不创建 GameObject，开销低。\n- 单次最多 1023 个，DrawMeshInstancedIndirect 用 ComputeBuffer 可破万。\n- 适合程序化生成的密集对象（草地、人群、碎片）。\n- 缺点：不参与场景剔除自动管理、没有 GameObject 生命周期。\n\n**选型**：\n- 场景里静态大量重复物 → GPU Instancing（材质开关即可）。\n- 动态/程序化海量实例 → DrawMeshInstancedIndirect + Compute Shader。\n- 注意：不同材质打断 instancing；阴影/光照 pass 也要支持 instancing。",
+    "tags": [
+      "GPUInstancing",
+      "DrawMesh",
+      "合批"
+    ]
+  },
+  {
+    "id": "vfx-004",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "溶解（Dissolve）特效的 Shader 实现原理？",
+    "answer": "原理：用噪声图（R 通道）和阈值比较，clip 掉低于阈值的部分，阈值边缘附近染上发光边色。\n\n```\nfloat noise = tex2D(_DissolveMap, uv).r;\nclip(noise - _DissolveAmount);  // 低于阈值丢弃\nfloat edge = smoothstep(_DissolveAmount, _DissolveAmount + _EdgeWidth, noise);\ncol = lerp(_EdgeColor, col, edge);\n```\n\n要点：\n- RenderType=TransparentCutout，Queue=AlphaTest，可走 Early-Z。\n- 噪声图用程序化（Simplex/Value Noise）或预烘焙，避免帧间抖动。\n- 边缘发光可叠 Emission + Bloom 增强。\n- 移动端：半精度、纹理小尺寸、关掉边缘复杂计算。\n- 进阶：方向性（沿 UV 某方向溶解）、多层噪声叠加避免规则感。\n- 配合粒子（飞散碎片）增强表现。",
+    "tags": [
+      "溶解",
+      "Shader",
+      "Dissolve"
+    ]
+  },
+  {
+    "id": "vfx-005",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "拖尾（Trail）特效有哪些实现方案？各自的优缺点？",
+    "answer": "**方案一：TrailRenderer（UE5 内置）**\n- 基于顶点带，记录历史位置生成网格。\n- 优点：开箱即用、支持纹理/颜色渐变。\n- 缺点：CPU 逐帧重建 mesh，大量拖尾开销大；形状受采样点限制。\n\n**方案二：粒子拖尾**\n- 发射器跟随目标，粒子拉长（stretched billboard）形成尾迹。\n- 优点：GPU 友好、视觉柔和。\n- 缺点：边缘不够锐利、可控性弱。\n\n**方案三：GPU 拖尾（Compute Shader + Ring Buffer）**\n- 用 ComputeBuffer 存历史点，shader 生成三角带。\n- 优点：海量拖尾仍高性能（刀光、弹幕）。\n- 缺点：实现复杂，调试难。\n\n**方案四：屏幕空间运动模糊**\n- 对快速移动物体后处理模糊，伪拖尾。\n- 优点：极廉价。\n- 缺点：不是真几何体，遮挡关系错。\n\n选型：少量主角拖尾用 TrailRenderer；海量弹幕用 GPU 方案；移动端用粒子或后处理。",
+    "tags": [
+      "拖尾",
+      "Trail",
+      "GPU"
+    ]
+  },
+  {
+    "id": "vfx-006",
+    "category": "vfx",
+    "difficulty": "初级",
+    "question": "Additive 和 AlphaBlend 混合模式在特效中的选择？",
+    "answer": "**Additive（One One）**：`out = src + dst`，越叠越亮，黑色不影响。\n- 适用：火焰、爆炸、能量光、闪电、光晕。\n- 优点：不需要排序（交换律），明亮物体效果好。\n- 缺点：高密度过曝发白，彩色细节丢失。\n\n**AlphaBlend（SrcAlpha OneMinusSrcAlpha）**：`out = src.a*src + (1-src.a)*dst`，半透明叠加。\n- 适用：烟雾、水、玻璃、魔法罩、UI 半透明。\n- 优点：保留彩色细节，能透过背景。\n- 缺点：需要排序，overdraw 严重时费。\n\n**选择原则**：\n- 发光类用 Additive，能 Additive 就别 AlphaBlend。\n- 需要颜色层次（烟雾、毒气）用 AlphaBlend。\n- 能 AlphaTest（硬边）就别 AlphaBlend（可 Early-Z）。\n- 移动端：Additive > AlphaTest > AlphaBlend。\n\n混合：火焰核心 Additive，烟雾 AlphaBlend，分两个粒子系统。",
+    "tags": [
+      "混合模式",
+      "Additive",
+      "AlphaBlend"
+    ]
+  },
+  {
+    "id": "vfx-007",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "UE5 粒子系统（ParticleSystem）的主要模块有哪些？哪些对性能影响最大？",
+    "answer": "主要模块：\n- Main（基础：时长、循环、发射率、粒子寿命、速度、大小、旋转、颜色）\n- Emission（发射速率、突发 burst）\n- Shape（发射形状：球、锥、框、网格）\n- Color over Lifetime、Size over Lifetime\n- Velocity over Lifetime、Force over Lifetime\n- Limit Velocity over Lifetime（阻力、终端速度）\n- Inherit Velocity（继承发射器速度）\n- Collision（碰撞：平面/世界）\n- Triggers（触发器）\n- Sub Emitters（子发射器：死亡/碰撞/出生时发射）\n- Texture Sheet Animation（帧动画）\n- Renderer（材质、渲染模式）\n\n**性能影响最大的**：\n- Collision（世界碰撞最贵，CPU 物理查询）。\n- Triggers（同样物理查询）。\n- Sub Emitters（粒子数指数增长）。\n- 高发射率 + 长寿命（粒子总数爆炸）。\n- Trail（每粒子带 TrailRenderer）。\n\n优化：移动端关 Collision/Triggers，用 Sub Emitters 控总量。",
+    "tags": [
+      "粒子系统",
+      "模块",
+      "ParticleSystem"
+    ]
+  },
+  {
+    "id": "vfx-008",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "UE5 Niagara 和 Cascade 粒子系统的区别？什么时候用 Niagara？",
+    "answer": "**Cascade（旧 CPU 粒子）**：\n- 粒子在 CPU 更新，每帧逐个算位置。\n- 模块固定，扩展要写 C++ 重新编译。\n- 适合：少量到中等数量（<10k）、简单特效、移动端兼容好。\n- 缺点：几万粒子就卡；模块不可脚本化。\n- UE5 保留只为兼容旧资产。\n\n**Niagara（新 GPU 粒子）**：\n- 支持 CPU + GPU 仿真（GPU 用 Compute Shader）。\n- GPU 仿真可跑几十万到上百万粒子。\n- 模块化、可脚本化（Scratch Pad / HLSL）。\n- 节点式编辑，System → Emitter → Module 三层架构。\n- 支持 Data Interface（读骨骼/碰撞/Spline/Audio）。\n- 调试工具完善（Profiler、参数可视化）。\n- UE5 推荐全用 Niagara。\n\n**用 Niagara 的场景**：\n- 大规模粒子（暴风雪、星海、百万草地）。\n- 复杂程序化效果（流体、烟雾模拟）。\n- 高性能需求特效（3A 主机）。\n- 需要与场景交互（骨骼绑定、碰撞）。\n- GPU 仿真海量粒子。\n\n**不用 Niagara**：\n- 极低端移动端（不支持 Compute）。\n- 旧项目维护 Cascade 资产。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| ParticleSystem（CPU） | Cascade（CPU） |\n| VFX Graph（GPU） | Niagara（CPU + GPU） |\n| VFX Graph 需 URP/HDRP | Niagara 全管线支持 |\n| 不支持物理碰撞 | Niagara 用 Data Interface 碰撞 |\n\n**面试加分点**：Niagara 的 Module Stack 是数据驱动（Data Driven），比 Cascade 硬编码灵活；GPU 仿真用 Compute Shader，粒子数与性能非线性；Niagara Data Interface 能读骨骼/SDF/Spline 做交互特效；Chaos 物理集成。",
+    "tags": [
+      "Niagara",
+      "Cascade",
+      "GPU粒子",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-009",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Bloom 后处理的原理和参数调优？阈值设置不当会怎样？",
+    "answer": "原理：\n1. 取亮度超过阈值的像素（bright pass）。\n2. 多次高斯模糊降采样（金字塔）。\n3. 上采样叠加回原图。\n4. 形成发光晕染效果。\n\n关键参数：\n- **Threshold（阈值）**：亮度 > 此值的像素才发光。设太高→发光弱；太低→全屏发灰、暗部也亮。\n- **Intensity**：发光强度。\n- **Radius/Scatter**：发光半径/扩散。\n- **Tint**：发光色调。\n- **Clamp**：限制最大亮度，防止过曝。\n\n阈值设置不当：\n- 太低（<0.5）：天空、白色物体全发光，画面发雾、发灰，HDR 失真。\n- 太高（>2.0）：只有强光源发光，效果不明显。\n- 正确：配合 Tone Mapping（ACES），阈值设在 1.0 附近（HDR 线性空间），只让真正高亮的发光。\n\n移动端：Bloom 降半分辨率跑，blur 迭代次数减到 4-6 层。",
+    "tags": [
+      "Bloom",
+      "后处理",
+      "HDR"
+    ]
+  },
+  {
+    "id": "vfx-010",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Tone Mapping（色调映射）的作用？ACES 和 Reinhard 的区别？",
+    "answer": "作用：把 HDR（线性，可能 >1.0）的颜色映射到 LDR（0-1）显示，防止过曝发白，保留暗部和亮部细节。\n\n**Reinhard**：`out = color / (1 + color)`\n- 简单，全局压暗。\n- 缺点：高亮区域压成灰色，色彩饱和度损失。\n\n**ACES（Academy Color Encoding System）**：电影行业标准近似\n- 曲线：暗部对比度提升，高光柔和压缩。\n- 色彩饱和度保留好，肤色自然。\n- 当前主流，UE5 默认。\n\n**Neutral**：线性近似，对比度低，适合需要后期调色的素材。\n\n影响：\n- 不开 Tone Mapping：HDR 直接 clamp，亮处全白，细节丢失。\n- ACES：画面有 \"电影感\"，暗部发蓝，高光柔和。\n- Reinhard：画面整体发灰。\n\n与 Bloom 配合：Bloom 阈值在 Tone Mapping 之前算（HDR 空间），避免被 tone map 压低。",
+    "tags": [
+      "ToneMapping",
+      "ACES",
+      "HDR"
+    ]
+  },
+  {
+    "id": "vfx-011",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Color Grading（颜色分级）的 LUT 是什么？UE5 里如何制作和应用？",
+    "answer": "LUT（Look-Up Table）：颜色查找表，把输入颜色映射到输出颜色。3D LUT 是三维表（RGB 各维度采样），表达任意颜色变换。\n\n**制作流程**：\n1. 截一张 UE5 游戏画面（sRGB）。\n2. 在 DaVinci Resolve / Photoshop / Lightroom 里调色（曲线、HSL、色相）。\n3. 导出 3D LUT（.cube 文件）。\n4. 转 UE5 用的 LUT 贴图（32×32×32 排列成 2D PNG）。\n5. UE5 的 Post Process Volume → Color Grading → Global Illumination → LUT 贴图。\n\n**UE5 应用方式**：\n- **Post Process Volume**：Color Grading 卷展栏。\n  - White Balance：白平衡\n  - Global：全局调色（Saturation/Contrast/Gamma/Gain/Lift）\n  - Shadows/Midtones/Highlights：分通道调色\n  - LUT 贴图：最终风格 LUT\n- **Filmic Tonemapping**：HDR → LDR 映射，LUT 在 Tonemapping 后应用（LDR 空间）。\n\n**种类**：\n- 1D LUT：只能调亮度曲线，不能改色相。\n- 3D LUT：可任意颜色映射，常用 32×32×32。\n\n**注意**：\n- LUT 在 sRGB 空间制作的话，应用时要匹配工作流，否则颜色偏差。\n- UE5 的 LUT 在 Tonemapping 后应用（LDR 空间），和 Unity URP/HDRP 一致。\n\n**和 Unity 的对比**：\n| Unity URP/HDRP | UE5 |\n| Volume 组件 Color Adjustments | Post Process Volume Color Grading |\n| LUT 贴图 | LUT 贴图（同） |\n| 内置管线 PostProcessing Stack | Post Process Volume |\n\nUE5 的 Color Grading 集成在 Post Process Volume，无需独立组件。\n\n**面试加分点**：UE5 的 LUT 必须是 32×32×32 排列的 2D 贴图（1024×32）；r.Tonemapper.GrainQuantization 控制颗粒；ACES Tonemapping 配合 LUT 效果最佳；运行时切 LUT 做昼夜风格切换。",
+    "tags": [
+      "ColorGrading",
+      "LUT",
+      "调色",
+      "PostProcess",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-012",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "SSAO（屏幕空间环境光遮蔽）原理和优化？",
+    "answer": "原理：在屏幕空间近似计算每点的环境光遮蔽程度。物体缝隙、角落环境光被遮挡，变暗，增强立体感。\n\n**实现步骤**：\n1. 重建每像素的世界位置/法线（从深度+法线缓冲）。\n2. 在该点法线方向的半球内采样多个点。\n3. 比较采样点深度与场景深度，被遮挡的样本贡献遮蔽。\n4. 累加得 AO 因子，乘到环境光。\n\n**优化**：\n- 降分辨率（半或 1/4）跑 AO，再上采样模糊。\n- 采样点数 8-16，多了贵。\n- 用噪声 dither + 时空复用（TAA）减少采样。\n- 用 Hi-Z（深度金字塔）加速采样。\n- 模糊去噪（双边滤波保边缘）。\n\n**变体**：\n- SSAO：原始，只深度。\n- HBAO：用法线，更准。\n- GTAO：高质量，考虑多 bounce。\n- RTAO：光线追踪，最准但贵。\n\n移动端基本不用 SSAO，用烘焙 AO（贴图）代替，或简化版本（少采样、降分辨率）。",
+    "tags": [
+      "SSAO",
+      "环境光遮蔽",
+      "后处理"
+    ]
+  },
+  {
+    "id": "vfx-013",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "景深（DOF）后处理的原理？移动端怎么简化？",
+    "answer": "原理：根据像素深度，对焦点外区域做模糊（高斯/泊松），焦点内清晰。\n\n**实现**：\n1. 采样深度缓冲，计算每像素的 Circle of Confusion（CoC，弥散圆大小）。\n2. 按 CoC 对颜色缓冲做模糊（近模糊、远模糊）。\n3. 和原图混合（CoC 做权重）。\n\n**质量技巧**：\n- 散景（Bokeh）：用圆盘采样而非高斯，模拟真实镜头光斑。\n- 近景模糊：物体靠近相机时模糊（前景虚化）。\n- 远景模糊：远处模糊。\n\n**移动端简化**：\n- 降分辨率跑模糊（1/4 分辨率）。\n- 用高斯近似散景（圆形采样太贵）。\n- 只做远景模糊，不做前景。\n- 减少模糊迭代次数。\n- 关闭散景高光。\n\n**问题**：\n- 深度不连续处边缘泄漏（前景物体被模糊色染）→ 需要深度 aware 的双边模糊。\n- 透明物体不在深度缓冲 → DOF 对透明无效。",
+    "tags": [
+      "景深",
+      "DOF",
+      "后处理"
+    ]
+  },
+  {
+    "id": "vfx-014",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "运动模糊（Motion Blur）的实现原理？UE5 怎么实现？",
+    "answer": "原理：模拟相机或物体快速运动时的拖影。\n\n**相机运动模糊**：\n- 基于上一帧和当前帧的相机矩阵，计算每像素的速度向量。\n- 沿速度方向多次采样颜色缓冲，平均。\n- 速度大处模糊多。\n\n**物体运动模糊**：\n- 需要速度缓冲（Velocity Pass）。\n- 速度来自前一帧物体位置 → 当前位置（骨骼蒙皮也参与）。\n- UE5 用 GBufferVelocity（Deferred）或单独 Velocity Pass（Forward）。\n\n**UE5 实现**：\n- **Velocity Pass**：渲染运动向量到 Velocity RT。\n  - 蒙皮网格：用上一帧骨骼矩阵 vs 当前帧矩阵算顶点速度。\n  - 相机运动：用上一帧 ViewMatrix vs 当前 ViewMatrix。\n- **Motion Blur Pass**：后处理阶段，沿速度方向采样。\n  - 采样点数（r.MotionBlur.SampleCount）控制质量。\n  - 强度（r.MotionBlur.Amount）控制模糊量。\n\n**材质节点**：\n- Post Process Material 可用 SceneTexture:Velocity 读取运动向量。\n- 自定义 motion blur shader 可基于此。\n\n**问题**：\n- 物体边缘拖影泄漏到背景 → 需要深度 aware。\n- 透明物体无速度（不写 Velocity）。\n- 采样次数多（8-16）贵。\n\n**移动端**：\n- 基本不用，或只用相机旋转模糊（廉价近似）。\n- r.MotionBlurQuality=0 关闭。\n\n**和 Unity 的对比**：\n| Unity URP | UE5 |\n| Velocity Texture | GBufferVelocity / Velocity Pass |\n| MotionBlur 后处理 | Motion Blur Pass |\n| HDRP 内置 | 内置 |\n\n**面试加分点**：UE5 的 Velocity 同时含相机和物体运动；TAA 复用 Velocity 做时序累积；Motion Blur 在 Tonemapping 前应用（HDR 空间）；r.MotionBlur.Scatter 提高质量但更贵。",
+    "tags": [
+      "运动模糊",
+      "MotionBlur",
+      "Velocity",
+      "后处理",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-015",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "屏幕空间反射 SSR 和 Cubemap 反射的取舍？",
+    "answer": "**Cubemap 反射**：\n- 预烘焙环境贴图，运行时按反射方向采样。\n- 优点：极廉价，一次纹理采样。\n- 缺点：静态，不能反射动态物体；只反映烘焙时的场景。\n- 适合：固定场景、金属反射、天空盒反射。\n\n**SSR**：\n- 屏幕空间沿反射方向步进找命中。\n- 优点：能反射动态物体、屏幕内一切。\n- 缺点：贵（多次深度采样）、屏幕外反射不到、高粗糙度模糊贵。\n- 适合：高质量反射（水面、地板、金属）。\n\n**组合策略**：\n- 粗糙度低（光滑）→ SSR。\n- 粗糙度高 → Cubemap（预滤波）。\n- SSR 没命中（屏幕外）→ fallback Cubemap。\n- 移动端：只用 Cubemap + Planar Reflection（特定平面）。\n\nPlanar Reflection：单独相机渲染水面视角，存 RenderTexture，反射最准但贵（多一次渲染）。",
+    "tags": [
+      "SSR",
+      "Cubemap",
+      "反射"
+    ]
+  },
+  {
+    "id": "vfx-016",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "镜头光晕（Lens Flare）和光晕（Halo）的区别？UE5 怎么实现？",
+    "answer": "**Lens Flare（镜头光晕）**：\n- 模拟镜头内部反射产生的光斑、光环、条纹。\n- 沿光源到屏幕中心的一条线分布多个光斑元件。\n- 元件类型：Circle、Ring、Image、Poly。\n- 受光源遮挡影响（被挡时减弱）。\n\n**Halo / Bloom 衍生光晕**：\n- 光源周围的柔光晕。\n- 通常靠 Bloom 实现（光源亮度 > 阈值就发光）。\n- 简单廉价。\n\n**UE5 实现**：\n\n**1. Lens Flare Asset（Lens Flare 元素）**：\n- UE5 的 Lens Flare 资产，配置光斑元件序列。\n- 可挂在 Light Component 上，自动随光源位置。\n- 支持遮挡查询（采样光源位置深度）。\n- 类似 Unity URP 12+ 的 Lens Flare 组件。\n\n**2. Bloom（后处理）**：\n- Post Process Volume > Bloom。\n- 阈值 + 多级高斯模糊。\n- 光源亮度 > 阈值自动发光。\n\n**3. 自定义 Lens Flare（Post Process Material）**：\n- PPM 采样光源屏幕位置，沿到中心方向画光斑。\n- 完全自定义，但需手写。\n\n**遮挡检测**：\n- 采样光源位置的 SceneDepth。\n- 若光源深度 > 场景深度，被挡，减弱光晕。\n\n**移动端**：\n- Lens Flare 用 Sprite 序列，少几个元件，可控。\n- Bloom 必备，阈值调好。\n- 慎用复杂的程序化 Flare（性能差）。\n\n**和 Unity 的对比**：\n| Unity URP 12+ | UE5 |\n| Lens Flare 组件 | Lens Flare Asset + Light |\n| 配置式 | 配置式 |\n| 遮挡查询 | 遮挡查询（同） |\n| Bloom 后处理 | Bloom 后处理（同） |\n\n**面试加分点**：UE5 的 Lens Flare 支持 Anamorphic（变形镜头条纹）；Bloom 的 Threshold 在 HDR 空间，配合 Tonemapping；移动端用简化 Bloom（降分辨率）+ 少量 Flare Sprite。",
+    "tags": [
+      "LensFlare",
+      "光晕",
+      "Bloom",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-017",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "VFX Graph 的 Output Context 和 Update Context 的关系？",
+    "answer": "VFX Graph 用 Context 组织粒子生命周期：\n\n- **Spawn Context**：发射参数（速率、burst、寿命）。\n- **Initialize Context**：粒子出生时初始化（位置、速度、大小、颜色）。\n- **Update Context**：每帧更新（力、积分、碰撞、死亡判断）。\n- **Output Context**：渲染输出（Quad/Mesh/Line/Particle），材质和渲染设置。\n\n数据流：Spawn → Initialize → Update（循环） → Output。\n\n**Update Context** 是性能关键：\n- 每帧每粒子执行，力场、积分、碰撞都在这。\n- 减少不必要的 Update 节点（如静止粒子不需要力场）。\n- 碰撞用 GPU distance field 或简单平面，避免复杂查询。\n\n**Output Context**：\n- 一个系统可有多个 Output（同时画 mesh 和 quad）。\n- 渲染模式：Quad（面片）、Mesh（模型）、Line（线条）、Octagon（八边形减少 overdraw）。\n- Output Strip 用于丝带/拖尾。\n\nGPU 粒子的优势：Update 在 Compute Shader，几十万粒子无压力。",
+    "tags": [
+      "VFXGraph",
+      "Context",
+      "GPU粒子"
+    ]
+  },
+  {
+    "id": "vfx-018",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "GPU 粒子的碰撞怎么实现？比 CPU 粒子碰撞差在哪？",
+    "answer": "CPU 粒子碰撞：用 Physics.Raycast / SphereCast，精确，能和任意 Collider 碰。但每粒子每帧查询，几千粒子就卡。\n\nGPU 粒子碰撞方案：\n\n**1. 深度缓冲碰撞**：\n- 采样场景深度图，粒子位置深度 > 场景深度时认为碰撞。\n- 优点：无需额外数据，全场景。\n- 缺点：只能正面碰撞，背后/侧面不准；精度受深度图分辨率限制。\n\n**2. Distance Field（SDF）碰撞**：\n- 预烘焙场景的 SDF（有符号距离场），存 3D 纹理。\n- 粒子查询 SDF，距离 < 0 表示在物体内。\n- 优点：精确，任意角度。\n- 缺点：SDF 烘焙静态场景，动态物体需重新烘焙；3D 纹理占显存。\n\n**3. 平面/球碰撞**：\n- 简单形状（地面、球体）解析碰撞。\n- 优点：极廉价。\n- 缺点：只能简单形状。\n\nGPU 碰撞普遍不如 CPU 精确，但够用。常见策略：地面用平面，复杂场景用 SDF，小范围交互用 CPU 子发射器。",
+    "tags": [
+      "GPU粒子",
+      "碰撞",
+      "SDF"
+    ]
+  },
+  {
+    "id": "vfx-019",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子系统的 Stretched Billboard 模式怎么用？做拖尾要注意什么？",
+    "answer": "Stretched Billboard：粒子按速度方向拉伸，形成动感。\n\n参数：\n- Speed Scale：沿速度方向的拉伸倍数。\n- Length Scale：固定长度拉伸。\n- Camera Scale：按相机距离缩放。\n\n公式（粗略）：粒子长度 = 速度大小 × SpeedScale + LengthScale。\n\n做拖尾效果：\n- 发射器跟随目标，粒子寿命短，初速度低。\n- Stretched Billboard 让粒子沿运动方向拉长。\n- 颜色随寿命渐隐。\n- 配合 \"stretch by velocity\"，速度大时拉得长。\n\n注意：\n- 速度突变会让粒子瞬间拉长/收缩，视觉抖动。\n- 拉伸方向是速度方向，不是路径切线，弯曲路径下效果不完美。\n- 移动端拉伸会增加填充率（长条形）。\n- 替代方案：用 TrailRenderer 做真拖尾，粒子做点缀。\n\n技巧：拉伸粒子 + 加性混合 + 颜色渐变 = 不错的速度线/拖尾效果，极廉价。",
+    "tags": [
+      "Billboard",
+      "拉伸",
+      "拖尾"
+    ]
+  },
+  {
+    "id": "vfx-020",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子贴图 Atlas 怎么做？为什么必须？",
+    "answer": "Atlas：把多个粒子贴图（火、烟、火星）打包到一张大图，用 UV 区分。\n\n**为什么必须**：\n- 不同贴图的粒子若分开材质 → 多个 draw call。\n- 同材质同 atlas → 一个 draw call 画所有粒子。\n- 移动端 draw call 预算紧（<100），合并至关重要。\n\n**制作**：\n1. DCC（Photoshop/Substance）把小贴图拼成一张 1024 或 2048。\n2. 每个 sprite 在 atlas 里的 UV 范围记录。\n3. UE5 粒子 Texture Sheet Animation 模块设置 tiles（行列）或 sprite mode。\n4. shader 里按 UV 偏移采样对应帧。\n\n**注意**：\n- Atlas 内贴图尺寸尽量一致，padding 防止采样溢出（mipmap 时邻图泄漏）。\n- 同类特效（火系、冰系）各做一个 atlas。\n- 帧动画（爆炸序列）也用 atlas，Texture Sheet Animation 切帧。\n- 移动端 atlas 建议 1024，PC 可 2048-4096。",
+    "tags": [
+      "Atlas",
+      "粒子",
+      "合批"
+    ]
+  },
+  {
+    "id": "vfx-021",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的 LOD 该怎么做？",
+    "answer": "特效 LOD 多维度降级：\n\n**1. 粒子数量**：远距离减少发射率、最大粒子数。\n- 近：max 200，远：max 50。\n\n**2. 贴图分辨率**：远距离用低 mip 或低分辨率贴图。\n- shader 里按距离选 mip level。\n\n**3. 关闭特性**：\n- 远距离关光照、阴影。\n- 关碰撞、子发射器。\n- 关 Trail。\n- 简化颜色渐变。\n\n**4. 切换特效版本**：\n- LOD0：完整特效（多粒子、有光照、有拖尾）。\n- LOD1：简化（粒子减半、无光照）。\n- LOD2：贴图 sprite（Billboard 一张图）。\n- LOD3：完全不渲染（远到看不见）。\n\n**5. 距离剔除**：超过阈值直接不画。\n\n**实现**：\n- ParticleSystem 的 LOD 模块（按 LOD 自动降发射率）。\n- 多个 ParticleSystem 按距离切换 Enable。\n- 脚本控制。\n\n要点：LOD 切换要平滑（fade），避免突然消失。特效 LOD 阈值比 mesh LOD 远（特效本来就小）。",
+    "tags": [
+      "LOD",
+      "特效",
+      "降级"
+    ]
+  },
+  {
+    "id": "vfx-022",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的渲染队列和排序问题？为什么会有特效穿插？",
+    "answer": "透明特效（AlphaBlend）需按距离排序，但 UE5 的排序有局限：\n\n**排序规则**：\n- 同 Queue 内，按物体中心到相机距离从远到近排序。\n- 不同 Queue 按 Queue 值排序。\n- ParticleSystem 内部粒子不排序（或简单排序）。\n\n**穿插原因**：\n1. 大体积特效：物体中心在远，但近端片元应靠前，导致背后物体被错误遮挡。\n2. 多个特效重叠：同 Queue 内按中心排序，局部穿插。\n3. 粒子内部：同系统的粒子之间不严格排序，Additive 可无视，AlphaBlend 会错。\n4. 透明物体和不透明物体：不透明先画写深度，透明后画读深度，正常。\n5. 透明物体之间：无 Early-Z，全靠排序，大体积必穿插。\n\n**缓解**：\n- 拆分大特效为多个小特效。\n- 用 Additive（无需排序）代替 AlphaBlend。\n- 用 AlphaTest（可 Early-Z）。\n- 提高关键特效的 Queue 值（+1）保证后画。\n- 分层渲染：UI 特效和场景特效分 Camera。\n\n完全解决需 Order Independent Transparency（OIT），贵，移动端不用。",
+    "tags": [
+      "渲染队列",
+      "排序",
+      "穿插"
+    ]
+  },
+  {
+    "id": "vfx-023",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "移动端特效的整体策略？怎么平衡表现和性能？",
+    "answer": "策略原则：**少而精，能 Additive 就 Additive，能贴图就别算**。\n\n**1. 数量控制**\n- 同屏粒子总数 <2000（中端机）。\n- 单个特效粒子数 <100。\n- 大型技能特效分阶段释放，不要同时全开。\n\n**2. 混合模式优先级**：Additive > AlphaTest > AlphaBlend。\n\n**3. 贴图**\n- Atlas 合并，单张 ≤256。\n- 开 mipmap。\n- 帧动画少帧数（4-8 帧）。\n\n**4. 着色**\n- 不透明特效用 AlphaTest（树叶、碎片）。\n- 关粒子光照、阴影。\n- 简化 shader（无 PBR，无多采样）。\n\n**5. 后处理**\n- 只保留 Bloom（降分辨率）+ 颜色分级。\n- 关 SSR、SSAO、DOF、Motion Blur。\n\n**6. LOD + 剔除**\n- 远距离特效降级或关。\n- 屏幕外特效停止更新。\n\n**7. 分级**\n- 高配机开 PBR 特效、后处理全开。\n- 中配减后处理。\n- 低配只保留核心特效，关装饰特效。\n\n实测：移动端一个角色技能特效控制在 2-3ms GPU 预算内。",
+    "tags": [
+      "移动端",
+      "特效策略",
+      "性能"
+    ]
+  },
+  {
+    "id": "vfx-024",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "特效的 GPU 预算怎么分配？一个技能特效多少 ms 合理？",
+    "answer": "帧预算参考（60FPS = 16.67ms）：\n\n**PC（中端）**：\n- 渲染总预算 10ms。\n- 特效预算 3-4ms（占渲染 30-40%）。\n- 单个角色技能特效 1-2ms。\n- 同屏多特效累计不超 5ms。\n\n**移动端（中端）**：\n- 渲染总预算 8ms（60FPS）。\n- 特效预算 2-3ms。\n- 单技能特效 0.5-1ms。\n- 关键战斗特效可到 1.5ms。\n\n**分配建议**：\n- 粒子更新（CPU）：0.5ms 内。\n- 粒子渲染（GPU）：1ms 内。\n- 后处理贡献：Bloom 0.5ms。\n\n**测量**：\n- UE5 Profiler → GPU Module，看每特效耗时。\n- Frame Debugger 看特效 draw call 数。\n- Snapdragon Profiler / Xcode GPU Capture 看移动端实际耗时。\n\n**优化到预算内**：\n- 粒子数按预算倒推（测单粒子成本，算上限）。\n- 远距离降级。\n- 关键帧全开，非关键帧简化。\n- 特效分阶段（起手轻，命中重）。",
+    "tags": [
+      "GPU预算",
+      "性能",
+      "特效"
+    ]
+  },
+  {
+    "id": "vfx-025",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Houdini 在特效制作流程里的角色？导出到 UE5 要注意什么？",
+    "answer": "Houdini 是程序化特效工具，擅长：\n- 烟雾、火焰、流体模拟（Pyro、FLIP）。\n- 破碎、破坏（Voronoi fracture）。\n- 程序化动画（属性驱动）。\n- 烘焙贴图（法线、流量图、SDF）。\n\n**导出 UE5 流程**：\n\n**1. 粒子序列帧**：\n- Houdini 渲染烟雾/火焰为图片序列（PNG/EXR）。\n- UE5 做成 atlas，粒子 Texture Sheet Animation 播放。\n- 优点：稳定、跨平台、移动端友好。\n- 缺点：视角固定，不能旋转。\n\n**2. 网格序列**：\n- 烘焙流体表面为 mesh 序列（Alembic .abc）。\n- UE5 用 Alembic 包播放。\n- 优点：真 3D，可旋转。\n- 缺点：mesh 数据大，加载慢。\n\n**3. 矢量场（Vector Field）**：\n- Houdini 导出 .fgv 或 .vf（3D 速度场）。\n- VFX Graph 用 Vector Field 节点驱动粒子。\n- 优点：程序化流动效果。\n\n**4. SDF**：\n- 导出 .raw 或 .nvdb，VFX Graph 碰撞用。\n\n注意：Houdini 坐标系（Y up）和 UE5 一致，但缩放（Houdini 米，UE5 米）要对齐；旋转方向（左手/右手）检查。",
+    "tags": [
+      "Houdini",
+      "流程",
+      "导出"
+    ]
+  },
+  {
+    "id": "vfx-026",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Substance Painter/Designer 在特效贴图制作中的用法？",
+    "answer": "**Substance Designer（程序化）**：\n- 节点式生成贴图，参数化可调。\n- 适合：噪声、渐变、纹理（火、烟、能量纹）。\n- 输出：Albedo、Alpha、Emission、Flow Map。\n- 优势：改参数立刻全图更新，迭代快；分辨率随意。\n\n**Substance Painter（绘制）**：\n- 手绘贴图，层式。\n- 适合：手绘风格的特效贴图、特定图案。\n- 输出：同上。\n\n**特效贴图特殊需求**：\n- Alpha 通道：粒子的形状 mask，单独通道或 embedded。\n- Emission：发光强度（HDR 颜色，>1）。\n- Flow Map：UV 流动方向，用于扭曲、能量流。\n- Normal：少量特效用（水面、冰面）。\n- 帧序列：爆炸、火焰帧动画。\n\n**导出注意**：\n- alpha 单独存成 PNG 或 RGBA 的 A 通道。\n- 移动端用 ASTC 压缩，alpha 边缘可能糊，预留 padding。\n- HDR 颜色贴图用 RGBM 或 BC6H（移动 ASTC HDR）。",
+    "tags": [
+      "Substance",
+      "贴图",
+      "流程"
+    ]
+  },
+  {
+    "id": "vfx-027",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "技能特效的分阶段制作和触发流程？",
+    "answer": "完整技能特效分阶段：\n\n**1. 起手（Wind-up）**\n- 蓄力光效、地面阵法、能量汇聚。\n- 0.3-0.8 秒。\n- 粒子少而精，预告玩家。\n\n**2. 释放（Cast）**\n- 主体爆发，方向性粒子、能量波。\n- 0.2-0.5 秒。\n- 粒子数峰值，Additive 发光。\n\n**3. 命中（Impact）**\n- 碰撞瞬间爆发，碎片、闪光、震屏。\n- 0.2-0.4 秒。\n- 屏幕震屏、时停（hit stop）。\n\n**4. 余韵（Aftermath）**\n- 烟雾消散、地面焦痕、残留光点。\n- 0.5-1.5 秒。\n- 粒子渐少，淡出。\n\n**触发方式**：\n- 动画事件（Animation Event）在关键帧触发对应 ParticleSystem。\n- 脚本状态机控制阶段切换。\n- 配合音效、相机震屏、时停。\n\n**预算分配**：起手 0.3ms、释放 1ms、命中 1.5ms、余韵 0.5ms，峰值控制在 2ms 内。",
+    "tags": [
+      "技能特效",
+      "分阶段",
+      "流程"
+    ]
+  },
+  {
+    "id": "vfx-028",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "屏幕震屏（Screen Shake）和时停（Hit Stop）怎么实现？UE5 里怎么做？",
+    "answer": "**屏幕震屏**：\n- 相机加随机位移/旋转，强度随时间衰减。\n- UE5 实现：\n  - **Camera Shake**：UE5 内置 CameraShake 资产，配置位置/旋转抖动曲线。\n  - **PlayerCameraManager::PlayCameraShake**：Blueprint / C++ 触发。\n  - 进阶：Perlin Noise 驱动（更自然）、分轴控制（XY 抖、Z 旋）。\n  - 限制：强度别过大（玩家晕）；持续 0.1-0.4 秒。\n\n**Blueprint 示例**：\n- Create CameraShake 资产，配置 Oscillation（位置）+ Rotation（旋转）。\n- 事件触发：PlayCameraShake(ShakeClass)。\n\n**时停（Hit Stop）**：\n- 命中瞬间游戏时间暂停几帧，增强打击感。\n- UE5 实现：\n  - **Time Dilation**：SetGlobalTimeDilation(0.05) 近停，计时器恢复 1.0。\n  - **Actor Time Dilation**：只对特定 Actor 时停（如敌人），玩家正常。\n  - 时停期间特效、动画可继续（用 Tick 时不乘 TimeDilation）。\n  - 持续 0.05-0.15 秒，长了卡顿感。\n\n**C++ 示例**：\n```cpp\nUGameplayStatics::SetGlobalTimeDilation(GetWorld(), 0.05f);\nFTimerHandle Handle;\nGetWorldTimerManager().SetTimer(Handle, []() {\n  UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 1.0f);\n}, 0.1f, false);\n```\n\n**配合**：\n- 重击：震屏 + 时停 + 命中粒子 + 音效。\n- 轻击：只命中粒子 + 小震屏。\n- 处决：长时停 + 慢镜头 + 大震屏。\n\n**打击感三件套**：粒子 + 震屏 + 音效，缺一不可。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| camera.transform.position += shake | CameraShake 资产 |\n| Time.timeScale = 0.05 | SetGlobalTimeDilation |\n| Invoke(\"Restore\") | FTimerHandle |\n| URP Volume Camera Shake（自定义） | CameraShake 内置 |\n\n**面试加分点**：UE5 的 CameraShake 支持 SourceLocation（震源方向感）；Actor Time Dilation 可局部时停；Niagara 粒子可设不受 TimeDilation 影响；Controller 视角震动用 PlayerController::ClientPlayCameraShake。",
+    "tags": [
+      "震屏",
+      "时停",
+      "打击感",
+      "CameraShake",
+      "TimeDilation",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-029",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的色调统一怎么做？为什么整个项目特效颜色要统一？",
+    "answer": "统一原因：\n- 杂乱颜色显廉价、不专业。\n- 统一色调增强项目识别度（原神蓝、崩坏紫）。\n- 配合 Color Grading 出风格。\n\n**统一方法**：\n\n**1. 色板规范**：\n- 制定项目主色板（3-5 个核心色）。\n- 每个角色/元素用色板内颜色。\n- 特效贴图按色板调色。\n\n**2. Emission 色统一**：\n- 火系：橙红黄。\n- 冰系：青蓝白。\n- 雷系：紫蓝白。\n- 治愈：绿金。\n- 暗影：紫黑红。\n\n**3. 后处理统一**：\n- Color Grading LUT 统一风格。\n- Bloom 参数全局一致。\n- Vignette / Chromatic Aberration 微调。\n\n**4. 特效 Review**：\n- TA 检查每特效颜色是否合规。\n- 建立特效色卡参考。\n\n**5. 跨特效一致性**：\n- 同类技能（不同角色火球）颜色基调一致，差异在细节。\n- 命中特效通用模板，换色换贴图即可。",
+    "tags": [
+      "色调",
+      "统一",
+      "色板"
+    ]
+  },
+  {
+    "id": "vfx-030",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子发射器的形状（Shape）模块怎么选？对表现的影响？",
+    "answer": "Shape 决定粒子初始位置和方向分布：\n\n- **Sphere（球）**：均匀向外，适合爆炸、能量球。\n- **Hemisphere（半球）**：上半球，适合喷泉、地上烟。\n- **Cone（锥）**：方向性，适合枪口火、喷射。\n- **Box（盒）**：区域随机，适合范围特效（毒气区）。\n- **Circle（圆）**：平面圆，适合地面阵法。\n- **Edge（边）**：线段，适合刀光、能量线。\n- **Mesh（网格）**：沿 mesh 表面发射，适合溶解、破碎。\n- **Mesh Renderer**：沿现有 mesh 发射。\n- **Skinned Mesh Renderer**：沿骨骼 mesh 发射（角色身上）。\n\n**参数**：\n- Radius/Size：形状大小。\n- Angle（Cone）：锥角。\n- Random Direction：是否随机方向。\n- Align To Direction：粒子朝向运动方向。\n\n**表现影响**：\n- Shape 选错特效质感全变。例：爆炸用 Cone → 像喷火，用 Sphere → 真爆炸。\n- Mesh Shape 慢（每顶点查询），慎用。\n- Skinned Mesh 发射要烘焙 mesh，移动端贵。\n\n技巧：组合多个不同 Shape 的发射器叠加出复杂效果。",
+    "tags": [
+      "Shape",
+      "发射器",
+      "粒子"
+    ]
+  },
+  {
+    "id": "vfx-031",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子 Collision 模块的代价？什么场景用？",
+    "answer": "Collision 模块让粒子与场景/物体碰撞，代价高（每粒子每帧物理查询）。\n\n**模式**：\n- **Planes**：自定义平面，廉价。\n- **World**：与场景 Collider 碰，贵（Scene Query）。\n  - Quality: High/Medium/Low 调精度。\n  - Dampen：碰撞后减速。\n  - Bounce：反弹系数。\n  - Lifetime Loss：碰撞减寿。\n\n**代价**：\n- World 模式每粒子每帧 Raycast，1000 粒子 = 1000 次查询，CPU 卡。\n- Planes 模式廉价（解析计算）。\n\n**使用场景**：\n- 碎片落地：World Collision，反弹 + 减速 + 减寿。\n- 雨水溅落：World Collision，命中触发 Sub Emitter（水花）。\n- 火焰沿地面流：Plane（地面）Collision。\n\n**优化**：\n- 移动端不用 World Collision。\n- 用 Plane 近似地面。\n- 减少需要碰撞的粒子数（只主碎片碰，小粒子不碰）。\n- GPU 粒子用 SDF 碰撞代替。\n- 用 Sub Emitter 模拟 \"碰撞效果\" 而非真碰撞（命中预设位置触发）。",
+    "tags": [
+      "Collision",
+      "碰撞",
+      "性能"
+    ]
+  },
+  {
+    "id": "vfx-032",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Sub Emitters（子发射器）的用法和陷阱？",
+    "answer": "Sub Emitters 在特定事件触发另一个粒子系统：\n\n**触发时机**：\n- Birth：粒子出生时（如每个火花带小烟雾）。\n- Collision：碰撞时（如雨点落地溅水花）。\n- Death：死亡时（如碎片爆开消失）。\n- Manual：脚本触发。\n\n**用法**：\n- 烟雾拖尾：主粒子移动，每个 birth 触发小烟雾子粒子。\n- 爆炸链：主爆炸碎片 death 触发小爆炸。\n- 碰撞反馈：碎片落地溅起灰尘。\n\n**陷阱**：\n1. **粒子数爆炸**：主粒子 100，每个 birth 触发子 10 = 1000 子粒子，再 birth 子 = 10000，指数增长。\n   - 限制子发射器 max particles。\n   - 控制子发射概率（不每个都触发）。\n\n2. **性能**：每个子发射是独立 ParticleSystem，draw call 增加。\n   - 同材质子发射器合并。\n   - 减少不必要的子。\n\n3. **继承属性**：子粒子是否继承父粒子速度/位置。\n   - 按需配置，避免奇怪行为。\n\n4. **生命周期**：子粒子寿命数倍于父，导致特效拖尾过长。",
+    "tags": [
+      "SubEmitter",
+      "子发射器",
+      "粒子"
+    ]
+  },
+  {
+    "id": "vfx-033",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Niagara 系统的核心概念？System、Emitter、Module 的关系？和 Cascade 的区别？",
+    "answer": "**Niagara 三层架构**：\n\n**System（系统）**：\n- 顶层容器，一个完整的特效效果（如\"火球爆炸\"）\n- 持有多个 Emitter，控制它们的生命周期、播放顺序\n- 支持绑定到 Actor（Attachment），可接收外部参数\n- 可嵌套（System 里引用其他 System）\n- 支持编辑器内的暴露参数（ExposedParameters）给美术调\n\n**Emitter（发射器）**：\n- 一个粒子发射源，对应一种粒子行为（火花/烟/碎片）\n- 由 Module Stack 组成，按 Spawn → Init → Update → Output 组织\n- 可独立开关、设置 LoopCount、Burst\n- 一个 Emitter 只产生一类粒子，但可复用 Module\n- 可继承其他 Emitter（Inheritance）做模板\n\n**Module（模块）**：\n- 最小功能单元，控制粒子某一行为\n- 分组：\n  - **Spawn**：Spawn Burst / Spawn Rate / Spawn Burst Instantaneous\n  - **Initialization**：Initialize Particle / Initialize Location / Init Color\n  - **Update**：Gravity Force / Drag / Velocity / Color Update / Size Scale\n  - **Render/Output**：Sprite Renderer / Mesh Renderer / Ribbon Renderer\n- 支持自定义 Module（C++ / 蓝图），HLSL 写脚本\n- 参数绑定（Parameter Binding）：模块间数据传递（如把 Speed 传给 Gravity）\n\n**Module Stack 执行模型**：\n- 每帧按顺序执行所有 Module\n- 数据存在 Particle Attributes（Position/Velocity/Color/Life/Age 等）\n- 支持事件（Event）：碰撞触发、死亡触发，跨 Emitter 通信\n- Data Interface（DI）：读场景数据（骨骼/Collision/Spline/Audio）\n\n**CPU vs GPU 仿真**：\n- CPU Emitter：粒子数少（< 10k），支持复杂逻辑和 DI\n- GPU Emitter：粒子数多（百万级），用 Compute Shader，DI 受限\n- 同一 System 可混用 CPU + GPU Emitter\n\n**Scratch Pad / Scripting**：\n- 内置可视化脚本编辑器（节点图）\n- 支持写 HLSL 片段直接控制粒子\n- 可定义自定义参数（User Variables）\n- 调试强：实时预览、参数可视化\n\n**和 Cascade（旧粒子系统）的区别**：\n- Cascade 模块固定，扩展要写 C++ 重新编译\n- Niagara 模块化、可脚本化，美术能自建 Module\n- Niagara 支持 GPU 仿真、Data Interface、Mesh Rendering\n- Niagara 调试工具完善（Scratch Pad、Profiler）\n- UE5 推荐全用 Niagara，Cascade 只为兼容旧资产保留\n\n**面试加分点**：\n- 提 Niagara 的 Module Stack 是数据驱动（Data Driven），比 Cascade 的硬编码灵活\n- 提 Niagara 的 Simulation Space（Local/World）选择对运动效果的影响\n- 提 Niagara Data Interface（DI）能读骨骼/碰撞/Spline，做交互特效\n- 提 Niagara 和 Chaos 物理、Field System 的集成",
+    "tags": [
+      "Niagara",
+      "System",
+      "Emitter",
+      "Module",
+      "粒子"
+    ]
+  },
+  {
+    "id": "vfx-034",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效和动画怎么联动？动画事件驱动特效？",
+    "answer": "联动方式：\n\n**1. Animation Event**：\n- 在动画时间轴上加事件，触发脚本函数。\n- 函数里 `Instantiate` 或 `Play` 特效。\n- 优点：和动画精确同步。\n- 缺点：事件在 Animation Clip 里，改动画要重设。\n\n**2. Animancer / Playable**：\n- 脚本控制动画，事件代码化。\n- 更灵活，事件可重用。\n\n**3. State Machine Behaviour**：\n- Animator 状态机里加脚本，状态进入/退出触发特效。\n- 适合状态切换特效（起手、攻击、受击）。\n\n**4. Bone 跟随**：\n- 特效挂在骨骼上（手、武器）。\n- 特效位置随骨骼更新。\n- 实现：ParticleSystem 的 \"Custom Simulation Space\" 设为骨骼 Transform。\n\n**5. 时间轴（Timeline / Sequencer）**：\n- 影视化过场用 Timeline 编排特效、动画、相机。\n- 精确控制时序。\n\n**注意**：\n- 特效触发要考虑动画 blend，事件可能在 blend 中触发。\n- 网络游戏要同步特效触发。\n- 特效池化，避免频繁 Instantiate。",
+    "tags": [
+      "动画事件",
+      "联动",
+      "Animation"
+    ]
+  },
+  {
+    "id": "vfx-035",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Decal（贴花）在特效中的作用？UE5 怎么实现？",
+    "answer": "Decal：贴在表面的纹理，常用于：\n- 弹孔、焦痕、血迹。\n- 地面阵法、技能印记。\n- 临时标识（瞄准点、范围圈）。\n\n**UE5 实现方式**：\n\n**1. Decal Actor（推荐）**：\n- UE5 内置 DecalActor，Box 体积定义贴花区域。\n- 渲染时投影贴图到几何（DBuffer 或 Deferred Decal）。\n- 材质 Domain 设 Deferred Decal 或 Surface。\n- 支持影响 Albedo / Normal / Roughness / Emissive。\n- 性能好，移动端可用（Mobile Forward 用 DBuffer）。\n\n**2. DBuffer Decal（Deferred）**：\n- 在 G-Buffer 阶段贴，影响 Albedo/Normal/Roughness。\n- 质量最高，物体受光照正确。\n- 需 Deferred 渲染。\n\n**3. Mesh Decal**：\n- 直接做一个贴花 mesh，贴在地面上。\n- 优点：最廉价。\n- 缺点：不平整地面会穿模。\n\n**4. Post Process Material Decal**：\n- PPM 采样深度重建位置，投影贴花。\n- 灵活但贵。\n\n**材质设置**：\n- Material Domain: Deferred Decal 或 Surface。\n- Blend Mode: DBufferVelocity 或 Translucent。\n- 输出引脚按需接 Albedo/Normal/Roughness/Emissive。\n\n**注意**：\n- 贴花数量控制（每个一个 draw call）。\n- 生命周期管理（弹孔自动消失，Niagara 或 Blueprint 控制）。\n- 移动端用 DBuffer Decal 或 Mesh Decal。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| Projector（内置管线） | 无直接对应（贵，已弃用） |\n| Decal Renderer Feature（URP） | DecalActor + DBuffer |\n| Deferred Decal（HDRP） | DBuffer Decal（同） |\n| Box 体积投影 | Box 体积投影（同） |\n\n**面试加分点**：UE5 的 DBuffer Decal 在 Forward 也可用（Mobile DBuffer）；r.Decal.Stencil 控制贴花 stencil；Niagara 可直接生成 Decal（Decal Trail）；贴花可影响 Normal（弹孔凹凸感）。",
+    "tags": [
+      "Decal",
+      "贴花",
+      "DBuffer",
+      "DecalActor",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-036",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效池（Effect Pool）怎么实现？为什么必须？",
+    "answer": "为什么必须：\n- 频繁 Instantiate/Destroy 粒子系统 → GC 压力 + 内存碎片。\n- 粒子系统 Play/Stop 比 Instantiate 便宜得多。\n- 战斗中每秒可能触发几十个特效，不池化必卡。\n\n**实现**：\n```\npublic class EffectPool {\n  Dictionary<int, Queue<ParticleSystem>> pools;\n  \n  ParticleSystem Spawn(GameObject prefab, Vector3 pos) {\n    int id = prefab.GetInstanceID();\n    if (!pools.ContainsKey(id)) pools[id] = new Queue<ParticleSystem>();\n    var q = pools[id];\n    ParticleSystem ps;\n    if (q.Count > 0) ps = q.Dequeue();\n    else ps = Instantiate(prefab).GetComponent<ParticleSystem>();\n    ps.transform.position = pos;\n    ps.Play();\n    StartCoroutine(ReturnAfter(ps, id, ps.main.duration));\n    return ps;\n  }\n  \n  IEnumerator ReturnAfter(ParticleSystem ps, int id, float t) {\n    yield return new WaitForSeconds(t);\n    ps.Stop();\n    pools[id].Enqueue(ps);\n  }\n}\n```\n\n**要点**：\n- 按 prefab 分池，避免类型混淆。\n- 返回时机 = 主粒子寿命 + 缓冲（子粒子可能更久）。\n- 池预热度（开局预 Instantiate 一批）。\n- 池上限，超出销毁。\n- Stop 而非 Destroy，Play 重新触发。",
+    "tags": [
+      "对象池",
+      "EffectPool",
+      "性能"
+    ]
+  },
+  {
+    "id": "vfx-037",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效和音效怎么同步？",
+    "answer": "同步原则：**特效触发时音效同时响**，时长匹配。\n\n**实现**：\n\n**1. 同一触发点**：\n- 脚本里同时 `particleSystem.Play()` 和 `audioSource.PlayOneShot(clip)`。\n- 动画事件里同时触发。\n\n**2. 音效池**：\n- 和特效池一样，避免频繁 Play/Stop。\n- 预加载常用音效。\n\n**3. 时长匹配**：\n- 短特效配短音效（命中 0.2 秒）。\n- 持续特效配循环音效（火焰、毒气）。\n- 音效时长略长于特效，避免突兀结束。\n\n**4. 分阶段**：\n- 起手音（蓄力声）+ 释放音（爆发）+ 命中音 + 余韵音。\n- 各阶段独立触发，与特效阶段同步。\n\n**5. 音量/音调随机**：\n- 多次触发同一音效时，音量/音调随机 ±5%，避免机械感。\n\n**6. 3D 空间音效**：\n- 远距离特效音衰减。\n- 方向性（玩家身后听不到）。\n\n注意：音效延迟容忍度比特效低（50ms 就能察觉），网络同步特效要补偿音效时间。",
+    "tags": [
+      "音效",
+      "同步",
+      "Audio"
+    ]
+  },
+  {
+    "id": "vfx-038",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "环境特效（雾、雨、雪）怎么做？性能要注意什么？",
+    "answer": "**雾**：\n- 后处理雾（Fog）最廉价，按深度染色。\n- 体积雾（Volumetric Fog）：3D 噪声 + ray marching，贵但真。\n- 移动端：后处理指数雾 + 少量粒子雾团。\n\n**雨**：\n- 粒子雨：竖直发射，长 lifetime，stretched billboard。\n- 全屏雨：屏幕空间条纹 shader，廉价但视角受限。\n- 雨溅落：地面 Sub Emitter 水花。\n- 性能：粒子数控制，远距离降级，屏幕外不更新。\n\n**雪**：\n- 粒子雪：缓慢下落，随风偏移。\n- 地面积雪：shader 按 Y 阈值 + 噪声。\n- 性能：粒子数控制，雪贴图小。\n\n**性能注意**：\n- 天气特效覆盖全屏，粒子数易爆。\n- 用 GPU 粒子（VFX Graph）做海量雨雪。\n- 远距离粒子降级或关。\n- 雾用后处理代替粒子雾。\n- 雨溅 Sub Emitter 限制数量。\n\n**移动端**：雨雪粒子数 <500，雾用后处理。",
+    "tags": [
+      "天气",
+      "环境特效",
+      "雾雨雪"
+    ]
+  },
+  {
+    "id": "vfx-039",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "后处理栈（Post Processing）的执行顺序怎么定？UE5 的顺序是什么？",
+    "answer": "顺序影响最终效果，UE5 典型顺序（Post Process Volume 内）：\n\n1. **SSAO**（屏幕空间 AO，在光照后，G-Buffer 可用）\n2. **SSR / SSGI**（屏幕空间反射/GI，在光照后）\n3. **DOF**（景深，深度 aware，独立 pass）\n4. **Motion Blur**（运动模糊，HDR 空间）\n5. **Bloom**（HDR 空间，发光）\n6. **Tone Mapping**（HDR → LDR，Filmic ACES）\n7. **Color Grading / LUT**（颜色分级，LDR 空间）\n8. **White Balance**（白平衡）\n9. **Channel Mixer / Split Toning**\n10. **Vignette**（暗角）\n11. **Chromatic Aberration**（色散）\n12. **Film Grain / Lens Distortion**\n13. **Post Process Material**（自定义，按 Blending Location 插入）\n\n**原则**：\n- HDR 操作（Bloom、Motion Blur）在 Tone Mapping 前。\n- 颜色分级（LUT、Color Grading）在 Tone Mapping 后（LDR 空间）。\n- 需要深度的（DOF/SSAO/SSR）独立 pass，在光照后。\n- 后期叠加（Vignette/Grain）最后。\n\n**Post Process Material 的 Blending Location**：\n- Before Tonemapping：HDR 空间，可做发光、扭曲。\n- After Tonemapping：LDR 空间，可做调色、暗角。\n- Replacing Tonemapping：完全替换 Tonemapping。\n\n**移动端精简**：\n- Bloom（降分辨率）+ Tonemapping + Color Grading + Vignette。\n- 关 SSR、SSAO、Motion Blur、DOF。\n- 单 pass 合并多个简单效果（Uber Post）。\n\n**和 Unity 的对比**：\n| Unity URP Volume | UE5 Post Process Volume |\n| 顺序固定（栈式） | 顺序固定（按 pass） |\n| Uber Post 合并 | Uber Post 合并（同） |\n| Renderer Feature 注入 | Post Process Material 插入 |\n\n**面试加分点**：UE5 的 Post Process Material 可选 Blending Location 灵活插入；r.PostProcessing.PropagateColor 全局调色；Mobile 精简路径用 r.Mobile.PostProcessing；Lumen GI 在 Bloom 前计算。",
+    "tags": [
+      "后处理",
+      "顺序",
+      "PostProcessing",
+      "BlendingLocation",
+      "UE5"
+    ]
+  },
+  {
+    "id": "vfx-040",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Chromatic Aberration（色散）和 Vignette（暗角）的作用和代价？",
+    "answer": "**Chromatic Aberration（色散）**：\n- 模拟镜头边缘 RGB 通道偏移，产生紫边/红蓝边。\n- 增加 \"镜头感\"，电影氛围。\n- 实现：按到屏幕中心的距离，R/G/B 通道 UV 不同方向偏移采样。\n```\nfloat2 dir = uv - 0.5;\nfloat dist = length(dir);\nfloat2 offset = dir * dist * _Strength;\ncol.r = tex2D(_MainTex, uv - offset).r;\ncol.g = tex2D(_MainTex, uv).g;\ncol.b = tex2D(_MainTex, uv + offset).b;\n```\n- 代价：3 次纹理采样，廉价。\n- 注意：强度别过大，否则边缘糊。\n\n**Vignette（暗角）**：\n- 屏幕四角变暗，聚焦中心。\n- 增强氛围、电影感。\n- 实现：按到中心距离乘暗色。\n```\nfloat v = saturate(1 - length(uv - 0.5) * _Strength);\ncol *= v;\n```\n- 代价：1 次乘法，极廉价。\n\n两者都是 \"氛围增益\"，移动端可保留（廉价），但强度要克制。",
+    "tags": [
+      "色散",
+      "暗角",
+      "后处理"
+    ]
+  },
+  {
+    "id": "vfx-041",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的命名规范和工程组织？",
+    "answer": "命名规范（推荐）：\n- 前缀_角色/元素_动作_变体\n- 例：`FX_Hero_FireBall_Lv2`、`FX_Enemy_Death_01`、`FX_Env_Rain_Loop`。\n- 粒子 prefab：`VFX_` 或 `FX_` 前缀。\n- 贴图：`T_FX_FireBall_01`（T 表示 Texture）。\n- 材质：`M_FX_FireBall_01`。\n- Shader：`S_FX_Dissolve`。\n- 动画：`A_FX_Cast_Fire`。\n\n**目录组织**：\n```\nAssets/\n  VFX/\n    Characters/\n      Hero/\n        FireBall/\n          VFX_Hero_FireBall.prefab\n          M_Hero_FireBall.mat\n          T_Hero_FireBall_01.png\n    Environment/\n      Weather/\n    Common/\n      Impact/\n      HitSlash/\n    Shaders/\n    Textures/\n      Atlas/\n```\n\n**规范好处**：\n- 搜索快（按前缀过滤）。\n- 团队协作清晰。\n- 自动化工具易识别（构建打包、剥离）。\n\n**版本**：变体加 `_v2`、`_final`，避免 `final_final_v3` 这种。",
+    "tags": [
+      "命名规范",
+      "工程组织",
+      "目录"
+    ]
+  },
+  {
+    "id": "vfx-042",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效 Review 的流程？TA 怎么把关特效质量？",
+    "answer": "Review 流程：\n\n**1. 提交前自检**：\n- 艺术家在引擎里跑特效，截图 + 录屏。\n- 填自检表（粒子数、贴图大小、draw call 数）。\n\n**2. TA Review**：\n- 在引擎实机查看，不只在 DCC。\n- 检查项：\n  - 视觉表现：是否符合设定、色调统一、动画流畅。\n  - 性能：粒子数、draw call、overdraw、GPU 耗时。\n  - 规范：命名、目录、材质参数、贴图压缩。\n  - 边界情况：远距离 LOD、屏幕外、和其他特效叠加。\n  - 平台：移动端是否可跑（降级方案）。\n\n**3. 反馈修改**：\n- TA 给具体修改意见（粒子减 30%、换 Additive、关 Collision）。\n- 艺术家修改后再 Review。\n\n**4. 最终签收**：\n- 性能达标 + 视觉达标 → 入库。\n- 记录到特效库（标签、参数、适用场景）。\n\n**工具**：\n- Review 场景（预设光照、相机、距离测试）。\n- Profiler 实时监控。\n- Checklist 文档。",
+    "tags": [
+      "Review",
+      "流程",
+      "质量"
+    ]
+  },
+  {
+    "id": "vfx-043",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的版本控制和协作？",
+    "answer": "版本控制注意：\n\n**1. 二进制文件**：\n- 贴图、mesh、动画是二进制，Git 合并难。\n- 用 Git LFS 或 Perforce（更适合二进制）。\n- 锁机制（Perforce checkout）避免冲突。\n\n**2. Prefab 和 Scene**：\n- UE5 prefab 是 YAML，可合并但冲突多。\n- Scene 文件冲突最难解，约定分工（每人独立场景）。\n\n**3. 粒子参数**：\n- ParticleSystem 的所有参数在 prefab 里，改一个值整个 prefab 变。\n- Review 时 diff 看不出具体改了啥，依赖提交说明。\n\n**4. 协作约定**：\n- 特效艺术家各自负责模块（角色 A、角色 B）。\n- 公共资源（贴图 atlas、shader）由 TA 维护。\n- 命名规范统一。\n- 提交信息详细（\"调整火球粒子数 80→60，减 draw call\"）。\n\n**5. 分支策略**：\n- 主分支稳定，特性分支开发。\n- Review 通过后合并。\n- 大版本（新角色）独立分支。\n\n**6. 资源依赖**：\n- 特效 prefab 引用贴图、材质、shader，移动文件要更新引用。\n- 用 UE5 的 Guid 而非路径。",
+    "tags": [
+      "版本控制",
+      "协作",
+      "Git"
+    ]
+  },
+  {
+    "id": "vfx-044",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "特效的 GPU Profiler 怎么用？怎么定位特效性能问题？",
+    "answer": "工具：\n\n**1. UE5 Profiler → GPU Module**：\n- 看每帧 GPU 耗时，按 pass 分解。\n- 找耗时高的 pass（透明渲染、后处理）。\n- 看具体 draw call 的耗时。\n\n**2. Frame Debugger**：\n- 逐 draw call 查看，看特效 draw call 数。\n- 检查不必要的 Pass（阴影、深度）。\n\n**3. RenderDoc**：\n- 抓帧，看每个 draw call 的状态、纹理、shader。\n- 看纹理采样次数、shader 指令数。\n- 看 overdraw（输出合并阶段）。\n\n**4. Snapdragon Profiler（Android）**：\n- 移动端真实 GPU 耗时。\n- 看每个 draw call 在 GPU 的耗时。\n- 看寄存器占用、带宽。\n\n**5. Xcode GPU Capture（iOS）**：\n- 同上，Apple GPU 专用。\n\n**定位问题**：\n- GPU 耗时高 → 看 overdraw（透明叠加）或 shader 复杂度。\n- draw call 多 → 合批失败？材质不同？\n- 带宽高 → 贴图大？全屏后处理？\n- CPU 卡 → 粒子更新？Collision？\n\n优化后重新测，记录 before/after。",
+    "tags": [
+      "Profiler",
+      "GPU",
+      "性能分析"
+    ]
+  },
+  {
+    "id": "vfx-045",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效在不同平台（PC/主机/移动）的适配策略？",
+    "answer": "适配维度：\n\n**1. 粒子数**：\n- PC：单特效 200-500，同屏 5000+。\n- 主机：单特效 100-300，同屏 3000。\n- 移动：单特效 50-150，同屏 1000-2000。\n\n**2. 贴图**：\n- PC：2048 atlas，BC7。\n- 主机：1024-2048，BC7。\n- 移动：1024 atlas，ASTC 6×6。\n\n**3. Shader**：\n- PC：完整 PBR、多光源、SSR。\n- 主机：完整 PBR、简化后处理。\n- 移动：简化 PBR、单光源、关 SSR/SSAO。\n\n**4. 后处理**：\n- PC：全开（Bloom、SSAO、SSR、DOF、Motion Blur、Color Grading）。\n- 主机：开 Bloom、SSAO、简化 DOF。\n- 移动：只 Bloom（降分辨率）+ Color Grading。\n\n**5. 实现**：\n- shader LOD（多 SubShader）。\n- 特效 prefab 多版本（PC/Mobile）。\n- QualitySettings 切换。\n- 平台宏 `#if UNITY_ANDROID`。\n- 运行时检测设备分级（内存、GPU 等级）。\n\n**6. 测试**：\n- 每平台真机测，不看模拟器。\n- 移动端测低端机（不是只测旗舰）。",
+    "tags": [
+      "平台适配",
+      "PC",
+      "移动端"
+    ]
+  },
+  {
+    "id": "vfx-046",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "Ribbon（丝带）渲染是什么？和 Trail 的区别？",
+    "answer": "Ribbon：粒子系统的丝带渲染模式，粒子之间连成三角带，形成连续条带。\n\n**和 Trail 区别**：\n- TrailRenderer：基于 Transform 路径，单一拖尾。\n- Ribbon：基于粒子链，多条/分支/宽度变化都行。\n- Ribbon 在 VFX Graph / Niagara 里是 Output Strip 模式。\n\n**用途**：\n- 复杂拖尾（多段、分支）。\n- 丝带状特效（彩带、能量流）。\n- 头发、布料近似。\n- 闪电分支。\n\n**实现**：\n- 粒子按顺序排列（age 或 spawn order）。\n- 相邻粒子生成两个顶点（按粒子法线/速度方向偏移宽度）。\n- 形成三角带。\n- UV 沿条带流动（贴图动画）。\n\n**注意**：\n- 粒子死亡会断带，需控制寿命或补间。\n- 宽度变化用曲线。\n- UV 流动让纹理沿条带移动（流光效果）。\n- 移动端：Ribbon 比 Trail 贵，慎用。",
+    "tags": [
+      "Ribbon",
+      "丝带",
+      "Trail"
+    ]
+  },
+  {
+    "id": "vfx-047",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子系统的 Custom Data 怎么用？",
+    "answer": "Custom Data：ParticleSystem 的自定义数据通道（Vector 1-4，Color 1-2），可在 shader 里读取，实现自定义效果。\n\n**用途**：\n- 传递脚本计算的数据到 shader（如目标位置、强度）。\n- 不修改 shader 全局变量，per-particle 不同。\n- 例：每个粒子飞向不同目标、每个粒子不同发光强度。\n\n**使用**：\n```\n// C# 设置 Custom Data\nvar ps = GetComponent<ParticleSystem>();\nvar customData = new List<Vector4>();\npc.GetCustomParticleData(customData, ParticleSystemCustomData.Custom1);\n// 修改 customData\nps.SetCustomParticleData(customData, ParticleSystemCustomData.Custom1);\n\n// shader 读取（需 Custom Vertex Streams 开启）\n// Vertex Streams 加 Custom1.xyzw\nfloat4 customData : CUSTOM1;  // 语义\n```\n\n**典型场景**：\n- 粒子目标追踪：Custom1 = 目标位置，shader 里计算朝向。\n- 粒子距离衰减：Custom1.x = 距离，控制大小/alpha。\n- 动态颜色：脚本算颜色传 Custom2。\n\n注意：每帧 SetCustomParticleData 有 CPU 开销，慎用大数据。",
+    "tags": [
+      "CustomData",
+      "粒子",
+      "Shader"
+    ]
+  },
+  {
+    "id": "vfx-048",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "粒子的 Custom Simulation Space 是什么？什么时候用 World/Local/Custom？",
+    "answer": "Simulation Space 决定粒子在哪个空间更新：\n\n**Local**：\n- 粒子在发射器局部空间更新，跟随发射器移动。\n- 适用：武器拖尾、角色身上特效（刀光）。\n- 缺点：发射器移动快时粒子 \"拖\" 在身后，不真实。\n\n**World**：\n- 粒子在世界空间，发射器移动粒子不动。\n- 适用：烟雾、爆炸残留（发射器走了，烟留下）。\n- 缺点：发射器快速移动时粒子 \"断\" 在原地。\n\n**Custom**：\n- 指定一个 Transform 作为参考空间。\n- 适用：粒子跟随特定骨骼/物体（不是发射器本身）。\n- 例：剑刃拖尾跟随剑骨骼，不是角色根。\n\n**选择**：\n- 移动物体上的特效：Custom（跟随骨骼）。\n- 留下的痕迹：World。\n- 武器瞬时特效：Local。\n\n注意：Local/Custom 在切换空间时有计算开销，World 最直观但快速移动有问题。VFX Graph 也有类似设置。",
+    "tags": [
+      "SimulationSpace",
+      "粒子",
+      "空间"
+    ]
+  },
+  {
+    "id": "vfx-049",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的 Lit 和 Unlit 怎么选？",
+    "answer": "**Unlit（不受光）**：\n- 不参与场景光照，颜色固定或按生命周期渐变。\n- 优点：廉价、颜色稳定、移动端首选。\n- 缺点：和环境光照脱节，可能 \"飘\"。\n- 适用：发光特效（火、能量、爆炸）、UI 特效、卡通风格。\n\n**Lit（受光）**：\n- 接受场景光照（主光、环境光）。\n- 优点：和环境融合、真实感强。\n- 缺点：贵（光照计算）、暗处特效看不清。\n- 适用：物理特效（碎片、烟雾受光）、写实风格。\n\n**选择原则**：\n- 发光类（火、电、能量）→ Unlit + Additive + Bloom。\n- 物理类（碎片、灰尘、烟雾）→ Lit 或半 Lit。\n- 卡通风格 → Unlit + 顶点色控制明暗。\n- 写实风格 → Lit，但控制粒子数。\n\n**移动端**：\n- 90% 用 Unlit，廉价且好看。\n- 少数关键物理特效用 Lit，但简化光照（只主光 Lambert）。\n\n折中：Unlit + 采样场景环境光颜色（一个 uniform），伪受光。",
+    "tags": [
+      "Lit",
+      "Unlit",
+      "受光"
+    ]
+  },
+  {
+    "id": "vfx-050",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "OIT（Order Independent Transparency）是什么？为什么移动端不用？",
+    "answer": "OIT：顺序无关透明渲染，不依赖排序就能正确混合透明物体。\n\n**常用算法**：\n\n**1. WBOIT（Weighted Blended OIT）**：\n- 每个透明片元按深度权重累积颜色和 alpha。\n- 最终合成。\n- 优点：廉价，单 pass 累积。\n- 缺点：不完全准确，颜色可能偏。\n\n**2. A-Buffer（Per-Pixel Linked List）**：\n- 每像素存一个片元链表。\n- 最后排序合成。\n- 优点：精确。\n- 缺点：显存大（每片元存数据），链表遍历贵。\n\n**3. Moment-Based**：\n- 用矩存储深度分布，近似透明。\n- 折中方案。\n\n**为什么移动端不用**：\n- 显存有限，链表方案爆内存。\n- 多 pass 累积，带宽爆。\n- TBR 架构不适合每像素链表。\n- 简化 WBOIT 效果不够好。\n\n移动端应对透明穿插：\n- 拆分大特效、用 Additive、手动排序、AlphaTest。\n- 接受少量穿插（玩家不易察觉）。",
+    "tags": [
+      "OIT",
+      "透明",
+      "排序"
+    ]
+  },
+  {
+    "id": "vfx-051",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的预热（Prewarm）是什么？什么时候用？",
+    "answer": "Prewarm：粒子系统开始时就处于 \"已经跑了一段时间\" 的状态，而非从 0 开始发射。\n\n**用途**：\n- 环境特效（火炬火焰、烟囱烟雾）：场景加载时特效应已在燃烧，而非慢慢起。\n- 持续循环特效：避免初始空荡。\n- 进入新区域时特效已稳定。\n\n**实现**：\n- ParticleSystem 主模块勾 Prewarm。\n- 启动时模拟 Duration 帧（一个循环周期）。\n- 粒子已分布在各寿命阶段。\n\n**注意**：\n- Prewarm 会瞬时创建大量粒子，可能卡一下（加载时无感，运行时慎用）。\n- VFX Graph 的 Spawn Context 有 Play Single / Loop 模式，Loop 可配 Prewarm。\n- 网络同步：所有客户端特效状态一致，Prewarm 可保证初始一致。\n\n**不用**：\n- 一次性特效（爆炸、命中）：从 0 开始才对。\n- 触发型特效（技能）：按触发播放。\n\nPrewarm 只用于持续环境特效。",
+    "tags": [
+      "Prewarm",
+      "预热",
+      "粒子"
+    ]
+  },
+  {
+    "id": "vfx-052",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效和地形/植被的交互？草地压弯怎么做？",
+    "answer": "草地交互方案：\n\n**1. 顶点色/纹理 Mask**：\n- 地形纹理标记交互区域。\n- 草地 shader 在该区域降低高度或改变颜色。\n- 静态，不响应动态物体。\n\n**2. 脚印纹理（RenderTexture）**：\n- 角色移动时在 RenderTexture 上画脚印（脚位置）。\n- 草地 shader 采样脚印纹理，压弯/变色。\n- 动态响应，效果好。\n- 代价：全屏 RenderTexture + 草地 shader 多一次采样。\n\n**3. 草地全局风**：\n- shader 里 sin 风场，所有草摆动。\n- 不交互但氛围好。\n\n**4. GPU 草 + Interaction System**：\n- 用 Compute Shader 算每根草和角色的交互。\n- 角色周围草压弯。\n- 高质量，需要 GPU Instancing 草。\n\n**5. 简化：距离场**：\n- 草 shader 接收角色位置 uniform，距离 < 阈值压弯。\n- 单角色便宜，多角色贵（多 uniform）。\n\n**移动端**：用方案 5（单角色距离）或方案 3（风），不用 RenderTexture 交互。",
+    "tags": [
+      "草地",
+      "交互",
+      "植被"
+    ]
+  },
+  {
+    "id": "vfx-053",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的 Performance Budget 文档怎么写？",
+    "answer": "文档结构：\n\n```\n# 特效性能预算\n\n## 平台\n- PC: 60FPS, 16.67ms, 特效预算 4ms\n- 主机: 30FPS, 33ms, 特效预算 6ms\n- 移动: 60FPS, 16.67ms, 特效预算 2ms\n\n## 粒子数预算\n| 类型 | PC | 主机 | 移动 |\n|------|----|------|------|\n| 单特效 | 500 | 300 | 150 |\n| 同屏总计 | 5000 | 3000 | 1500 |\n\n## Draw Call 预算\n- 单特效: ≤3\n- 同屏特效 draw call: ≤30\n\n## 贴图\n- 单 atlas: PC 2048, 移动 1024\n- 单贴图: PC 512, 移动 256\n\n## Overdraw\n- 移动 ≤3 层\n- PC ≤6 层\n\n## Shader\n- 移动单 shader 采样 ≤4\n- 移动 ALU 指令 ≤200\n\n## 后处理\n- 移动: Bloom + Color Grading\n- PC: 全开\n\n## 检查项\n- [ ] 粒子数\n- [ ] draw call\n- [ ] overdraw\n- [ ] GPU 耗时\n- [ ] 远距离 LOD\n- [ ] 平台降级\n```\n\n文档发给特效团队，每特效提交前自检，TA Review 核对。",
+    "tags": [
+      "预算",
+      "文档",
+      "规范"
+    ]
+  },
+  {
+    "id": "vfx-054",
+    "category": "vfx",
+    "difficulty": "中级",
+    "question": "特效的 KPI 和质量标准？",
+    "answer": "质量标准（多维）：\n\n**1. 表现**：\n- 符合美术设定（色调、形状、节奏）。\n- 动画流畅，无明显跳变。\n- 多角度观察无明显缺陷。\n- 和角色/场景融合自然。\n\n**2. 性能**：\n- GPU 耗时在预算内（移动 <1ms，PC <2ms）。\n- 粒子数、draw call 符合规范。\n- 远距离 LOD 正常。\n- 移动端可跑。\n\n**3. 工程**：\n- 命名规范、目录正确。\n- 贴图压缩正确。\n- shader 移动端兼容。\n- 无内存泄漏（粒子池正常）。\n\n**4. 稳定性**：\n- 长时间运行无累积错误。\n- 多次触发表现一致。\n- 边界情况（屏幕外、叠加）无异常。\n\n**KPI**：\n- 一次 Review 通过率 >80%。\n- 上线后特效相关 bug 数 <5。\n- 特效平均制作周期符合排期。\n- 性能达标率 100%。",
+    "tags": [
+      "KPI",
+      "质量",
+      "标准"
+    ]
+  },
+  {
+    "id": "vfx-055",
+    "category": "vfx",
+    "difficulty": "高级",
+    "question": "从零搭建一个 UE5 特效系统（项目级）要做什么？",
+    "answer": "搭建步骤：\n\n**1. 规范制定**：\n- 命名规范、目录结构（FX_/Characters/Env/Common）。\n- 性能预算文档（PC/移动 GPU ms 预算）。\n- 制作流程文档、Review 流程。\n\n**2. 工具链**：\n- 特效 prefab 模板（Niagara System 标准结构）。\n- 特效池框架（UE5 用 Object Pooling，Blueprint / C++）。\n- 触发系统（Anim Notify / Gameplay Tag / Blueprint）。\n- Review 场景（预设光照、相机、距离测试）。\n- 自动化检查工具（Editor Utility，检查命名、粒子数、贴图大小）。\n\n**3. Niagara 模块库**：\n- 通用 Module（Force、Color、Size、Collision）。\n- 自定义 Module（HLSL，项目特有逻辑）。\n- Data Interface（骨骼绑定、SDF 碰撞）。\n- Niagara System 模板（爆炸、烟雾、拖尾）。\n\n**4. 材质库**：\n- 通用特效材质（溶解、扭曲、流光、扫描线）。\n- Material Function 复用（噪声、Fresnel）。\n- 移动端简化版（LOD 材质）。\n- 材质变体管理（Quality Switch）。\n\n**5. 贴图库**：\n- 共享 Atlas（火、烟、能量）。\n- 噪声纹理库。\n- 帧动画库（Sprite Sheet）。\n\n**6. 后处理配置**：\n- Post Process Volume 全局配置（Bloom、Color Grading）。\n- Post Process Material 库（描边、扭曲）。\n- 移动端精简版。\n\n**7. 分级系统**：\n- Device Profile（设备检测分级）。\n- 特效多版本（PC/Mobile Niagara）。\n- Scalability Group 配置。\n- 运行时切换（r.EffectsQuality）。\n\n**8. 文档培训**：\n- 给特效艺术家培训规范、Niagara 使用。\n- 制作示例特效供参考。\n\n**9. 持续维护**：\n- 定期 Review 整体性能（ProfileGPU）。\n- 更新规范（新需求）。\n- 优化热点特效。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| ParticleSystem prefab | Niagara System 资产 |\n| VFX Graph | Niagara |\n| QualitySettings | Device Profile + Scalability |\n| URP Volume | Post Process Volume |\n| EffectPool（自写） | Object Pooling（自写 / Plugin） |\n\n**面试加分点**：UE5 的 Niagara 支持版本控制友好（文本资产）；Editor Utility Blueprint 做自动化检查；Device Profile 按设备分级；Niagara Profiler 看每 emitter 耗时；Nanite 可用于特效 mesh 碎片。",
+    "tags": [
+      "特效系统",
+      "搭建",
+      "Niagara",
+      "框架",
+      "UE5"
+    ]
+  }
+]

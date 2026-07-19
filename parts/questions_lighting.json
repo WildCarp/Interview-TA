@@ -1,0 +1,139 @@
+{
+  "category": "lighting",
+  "questions": [
+    {
+      "id": "lighting_001",
+      "category": "lighting",
+      "difficulty": "easy",
+      "question": "UE5 游戏引擎里的灯光有哪些类型？分别用在什么场景？",
+      "answer": "**UE5 主要灯光类型**：\n\n1. **Directional Light（方向光）**：\n   - 模拟太阳，所有光线平行\n   - 位置无关，只有方向\n   - 阴影：CSM（Cascaded Shadow Maps）分级\n   - 用途：室外日光、月光的主体光\n   - 支持 Lumen 动态 GI 联动\n\n2. **Point Light（点光源）**：\n   - 从一点向四周辐射，距离衰减\n   - 用途：灯泡、火把、爆炸特效、角色技能光\n   - 阴影：Cubemap shadow，开销大\n\n3. **Spot Light（聚光灯）**：\n   - 锥形光束，有方向和角度\n   - 用途：手电筒、舞台灯、探照灯、台灯\n   - 阴影：单张 depth map，开销适中\n\n4. **Rect Light（矩形面光源）**：\n   - UE5 原生支持，矩形发光面\n   - 阴影柔和（半影）\n   - 实时计算开销大，但比 Unity Area Light 更实用\n   - 用途：天花板灯带、广告灯箱、电视屏幕\n   - Lumen 下表现优秀\n\n**特殊光源**：\n\n- **Sky Light（天空光）**：提供环境光 ambient，采样天空盒\n  - 替代 Unity Sky Light / Environment Light\n  - 是 UE5 IBL 的核心\n\n- **Atmospheric Fog / Exponential Height Fog**：雾效，影响光照\n\n- **Emissive Material**：自发光材质配合 Lumen 可作为光源\n  - UE5 独有优势：任意 emissive 表面可照亮场景\n  - 替代 Unity 的 Area Light\n\n**UE5 移动端（Forward 渲染器）**：\n- 移动端不支持 Rect Light 实时阴影\n- 移动端 Light 数量受限（`r.Mobile.MaxLightsPerPass`）\n- 用烘焙 Lightmap + 少量实时光\n\n**性能开销排序**（从高到低）：\nRect Light > Spot with Shadow > Point with Shadow > Spot > Point > Directional with CSM > Directional\n\n**和 Unity 对比**：Unity URP/HDRP 也有上述光源；UE5 的优势是 Lumen 让 Emissive Material 和 Sky Light 动态产生 GI，Unity 需手动配 Reflection Probe + Light Probe。\n\n**面试加分点**：能讲清 UE5 的 `Light Mobility`（Static / Stationary / Movable）对性能和烘焙的影响，以及 Stationary 是性价比最高的选择。",
+      "tags": [
+        "灯光类型",
+        "Directional",
+        "Point",
+        "Spot",
+        "RectLight",
+        "UE5"
+      ]
+    },
+    {
+      "id": "lighting_002",
+      "category": "lighting",
+      "difficulty": "easy",
+      "question": "直接光和间接光有什么区别？",
+      "answer": "**直接光（Direct Light）**：\n- 从光源直接到达物体表面的光\n- 公式：BRDF × Light Color × N·L × 距离衰减\n- 实时光照计算的主体\n\n**间接光（Indirect Light）**：\n- 光源照到其他物体后，反射/散射到当前物体\n- 包括：\n  - 漫反射间接光（多次弹射的色光）\n  - 镜面间接光（反射看到的物体）\n  - 环境光（天空、地面的均匀光）\n\n**为什么需要间接光**：\n- 没有间接光，阴影里全黑（不真实）\n- 物体颜色 \"孤立\"，不会互相影响（红色墙不会让旁边的白球染红）\n- 真实世界 60%+ 的光是间接光\n\n**实现方式**：\n\n1. **烘焙（Lightmap）**：\n   - 离线计算，存到贴图\n   - 静态场景，质量最好，运行时几乎免费\n\n2. **Light Probe（光照探针）**：\n   - 离线烘焙，运行时插值\n   - 用于动态物体接收间接光\n\n3. **Reflection Probe（反射探针）**：\n   - 烘焙或实时 Cubemap\n   - 用于 PBR 的 IBL（镜面间接光）\n\n4. **实时 GI**：\n   - Enlighten / DDGI / RTGI\n   - 性能开销大，但能动态变化\n\n5. **SSAO / SSDO**：\n   - 屏幕空间近似间接光\n   - 屏幕角落变暗 / 颜色溢出\n\n**典型组合**：\n- 静态场景：Lightmap + Reflection Probe\n- 动态物体：Light Probe + 1 个 Realtime Directional Light\n- 高端 PC：再加 RTGI（光追全局光）",
+      "tags": [
+        "直接光",
+        "间接光",
+        "GI"
+      ]
+    },
+    {
+      "id": "lighting_003",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "什么是 Lightmap？它的 UV2 是什么？为什么需要？",
+      "answer": "**Lightmap**：离线烘焙的光照结果存到贴图，运行时直接采样，免计算。\n\n**好处**：\n- 高质量全局光照（多次反射、柔和阴影、色彩溢出）\n- 运行时几乎零开销\n- 适合静态场景\n\n**局限**：\n- 只能用于静态物体（动态物体走 Light Probe）\n- 烘焙耗时长，迭代慢\n- 包体增大（每张 1024² Lightmap ≈ 4MB）\n\n**UV2（Lightmap UV）**：\n- 物体原始 UV 主要用于贴图（颜色/法线），常重叠（如镜像、tiling）\n- Lightmap 必须有独立 UV，且：\n  - **不重叠**：每个像素对应唯一表面\n  - **在 [0,1] 范围内**：clamp 防溢出\n  - **留 padding**：避免边缘渗色\n  - **按面积分配**：大表面给大 UV 区域\n- 这就是 UV2（第二套 UV）\n\n**UE5 操作**：\n- Import FBX 时勾选 \"Generate Lightmap UVs\"\n- 或在模型 Inspector → Mesh → Lightmap UVs → Advanced Settings\n- 设置 padding、angle error、area error\n\n**Unreal**：\n- 自动生成 Lightmap UV\n- Mesh Editor 里可预览和调整\n\n**坑**：\n- 没生成 UV2 → 烘焙时引擎报错或结果错乱\n- UV2 重叠 → Lightmap 像素串扰\n- 自动生成 UV2 质量差时，需 DCC 端手动展",
+      "tags": [
+        "Lightmap",
+        "UV2",
+        "烘焙",
+        "GI"
+      ]
+    },
+    {
+      "id": "lighting_004",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "什么是 Light Probe？什么场景用？",
+      "answer": "**Light Probe**：空间中采样点的烘焙光照数据，用于动态物体接收间接光。\n\n**原理**：\n- 烘焙时在每个 probe 点记录该位置的球谐光照（Spherical Harmonics，SH）\n- 通常 3 阶 SH（9 个系数）存低频光照\n- 运行时，动态物体根据位置在最近的 probes 间插值\n\n**用途**：\n\n1. **动态角色接收间接光**：\n   - 角色从亮处走到暗处，环境光自然变化\n   - 比 1 个固定 ambient light 真实\n\n2. **动态物体反射环境色**：\n   - 移动的箱子颜色受周围影响\n\n3. **替代 Lightmap 的动态对象**：\n   - Lightmap 不能用于动态物体\n   - 用 Probe 提供类似效果\n\n**UE5 操作**：\n- 创建 Light Probe Group\n- 在场景里布置 probe 点（建议网格状，间距 2-5m）\n- 在重要位置加密（门口、转角）\n- 烘焙时自动填充 SH 数据\n\n**Unreal**：\n- Lightmass Importance Volume + Reflection Capture\n\n**布置原则**：\n- 光照变化大的地方加密（如阴影边界、室内外过渡）\n- 光照均匀的地方稀疏（开阔地）\n- 不要悬空（在表面附近）\n- 不要在墙内（采样错误）\n\n**性能**：\n- 单次 SH 采样几乎免费\n- 数百个 probe 不影响运行时\n- 烘焙时间长（每个点要 8-256 sample）\n\n**进阶**：\n- LPPV（Light Probe Proxy Volume）：用 volume 插值代替点插值，大物体（如车辆）光照更准",
+      "tags": [
+        "LightProbe",
+        "球谐",
+        "间接光",
+        "烘焙"
+      ]
+    },
+    {
+      "id": "lighting_005",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "Reflection Probe 怎么用？什么时候烘焙，什么时候实时？",
+      "answer": "**Reflection Probe**：场景某点的 Cubemap 反射环境，用于 PBR 的 IBL 镜面反射。\n\n**作用**：\n- 提供环境反射（金属、玻璃、水面）\n- PBR 的 specular IBL 必须有\n- 比 SSAO / SSR 更稳定（不依赖屏幕）\n\n**烘焙 vs 实时**：\n\n**烘焙（Baked）**：\n- 离线生成 Cubemap，存到内存\n- 运行时零开销\n- 适合静态场景（建筑、装饰物）\n- 缺点：环境变化时反射不更新\n\n**实时（Realtime）**：\n- 每帧或定时刷新 Cubemap\n- 适合动态环境（昼夜变化、可破坏场景）\n- 开销大：6 面渲染 × 几次 mip\n- 优化：低分辨率（256）、降低刷新频率（每秒 1-2 次）、只刷新可见 probe\n\n**Custom（自定义）**：\n- 美术手动指定 Cubemap\n- 用于特殊场景（如天空盒反射）\n\n**UE5 使用**：\n- 创建 Reflection Probe\n- 设置 Type（Baked/Realtime/Custom）\n- 设置 Box Bounds（影响范围）\n- 设置 Resolution（推荐 256，重要场景 512）\n- 烘焙：Lighting 窗口 → Generate Lighting\n\n**布置原则**：\n- 每个房间 / 区域一个 probe\n- 大空间多放几个\n- 角落和中心都要\n- Box Bounds 严格匹配空间（避免反射错位）\n\n**Blend Probes**：\n- 启用后，物体在多个 probe 边界间过渡，反射平滑切换\n- 重要场景必开\n\n**坑**：\n- Probe 数量太多导致烘焙慢\n- Realtime Probe 在移动端慎用\n- Box Bounds 太大 → 反射错位\n- 物体不在任何 probe 范围内 → 用天空盒兜底",
+      "tags": [
+        "ReflectionProbe",
+        "Cubemap",
+        "IBL",
+        "反射"
+      ]
+    },
+    {
+      "id": "lighting_006",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "实时阴影（Shadow Map）原理是什么？有什么常见问题？",
+      "answer": "**Shadow Map 原理**：\n\n1. **Pass 1（Shadow Caster）**：\n   - 把相机放在光源位置，渲染场景深度到一张深度贴图（Shadow Map）\n   - 只存深度，不存颜色\n\n2. **Pass 2（Main Render）**：\n   - 渲染每个像素时，转换到光源空间\n   - 比较当前像素深度与 Shadow Map 对应位置深度\n   - 如果当前深度 > Shadow Map 深度 → 在阴影里\n\n**常见问题**：\n\n1. **Shadow Acne（阴影疮）**：\n   - 因 Shadow Map 分辨率限制，表面出现条纹状假阴影\n   - 解决：Bias 偏移（但太大会出现 Peter Panning）\n\n2. **Peter Panning（影子分离）**：\n   - 物体和影子脱离（看起来像浮在空中）\n   - 解决：减小 Bias，或用 Normal Bias\n\n3. **Hard Edge（硬边阴影）**：\n   - 单采样导致锯齿边缘\n   - 解决：PCF（Percentage Closer Filtering）多次采样\n   - PCF 2×2 / 3×3 / 5×5\n\n4. **Perspective Aliasing**：\n   - 近处物体阴影模糊（Shadow Map 分辨率不够）\n   - 解决：CSM（级联阴影，近处用高分辨率 Shadow Map）\n\n5. **Light Bleeding / Shadow Leaking**：\n   - 阴影漏到本不该有阴影的地方\n   - 解决：调整 Bias、VSM（Variance Shadow Map）\n\n6. **远距离阴影消失**：\n   - Shadow Map 范围有限，远处无阴影\n   - 解决：增大 Shadow Distance（但精度下降）\n\n**优化**：\n- **CSM（Cascaded Shadow Maps）**：\n  - 按距离分 3-5 级 Shadow Map\n  - 近处高分辨率，远处低分辨率\n  - UE5/Unreal 默认用 CSM\n- **PCSS（PCF with Soft Shadows）**：\n  - 根据距离动态调整 PCF 半径，更真实\n- **VSM / EVSM**：用方差统计做软阴影，可硬件滤波\n- **RT Shadows**：光追阴影，完美硬阴影/软阴影，PC 端可用",
+      "tags": [
+        "ShadowMap",
+        "CSM",
+        "PCF",
+        "阴影"
+      ]
+    },
+    {
+      "id": "lighting_007",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "Lightmap 烘焙质量怎么调？常见参数有哪些？",
+      "answer": "**UE5 烘焙参数**（Lighting Settings）：\n\n1. **Lighting Mode**：\n   - **Baked Indirect**：只烘间接光，直接光实时\n   - **Subtractive**：烘直接+间接，阴影混合（旧式）\n   - **Baked GI / Shadowmask**：烘阴影 mask，运行时实时光 + 烘焙阴影混合\n   - 推荐：**Shadowmask**（移动端友好）\n\n2. **Lightmapper**：\n   - **Enlighten**（旧，慢但实时预览）\n   - **Progressive CPU**：渐进式，质量好，慢\n   - **Progressive GPU**：GPU 加速，快，推荐\n\n3. **Lightmap Resolution**：\n   - 每单位（米）多少 texel\n   - 推荐：\n     - 室内：1-2\n     - 室外大场景：0.2-0.5\n     - 角色附近：3-5\n\n4. **Lightmap Size**：\n   - 单张 Lightmap 大小（1024/2048/4096）\n   - 太大：内存占用高，但减少 Draw Call\n   - 太小：烘焙数量多，切换开销\n\n5. **Compress Lightmaps**：\n   - 默认开，质量轻微损失，包体省 75%\n   - 移动端必开\n\n6. **Ambient Occlusion**：\n   - 烘焙时计算 AO\n   - Max Distance：0.5-2m\n   - 增加细节真实感\n\n7. **Bounces**：\n   - 间接光反射次数\n   - 1-2 次够用，3+ 慢且收益小\n   - 室内场景建议 2-3 次\n\n8. **Filtering**：\n   - Gauss / A-Trous 降噪\n   - 减少噪点，但过度会模糊\n\n**Unreal Lightmass**：\n- Static Lighting Level Scale：场景缩放（1.0）\n- Num Sky Lighting Bounces：天空光弹射次数\n- Indirect Lighting Quality：间接光质量\n- Environment Color / Intensity\n\n**调试**：\n- Baked Lightmap 预览模式：查看 UV、强度分布\n- 物体勾 \"Lightmap Static\" 才参与烘焙\n- 烘焙后用 Light Explorer 查看每物体分辨率",
+      "tags": [
+        "Lightmap",
+        "烘焙",
+        "UE5",
+        "Unreal"
+      ]
+    },
+    {
+      "id": "lighting_008",
+      "category": "lighting",
+      "difficulty": "medium",
+      "question": "什么是 IBL？UE5 PBR 里怎么用？",
+      "answer": "**IBL（Image-Based Lighting）**：基于图像的光照，用环境贴图作为光源。\n\n**原理**：\n- 把场景的环境（天空、Sky Light 采样）当作光源\n- 每个表面根据法线方向采样环境光\n- 实现真实的环境反射、环境光\n\n**PBR 中的 IBL 组成**：\n\n1. **Diffuse IBL（漫反射环境光）**：\n   - **Irradiance Map**：低分辨率 Cubemap，存各方向入射光总和\n   - 或用 3 阶球谐（SH，9 系数）存低频光照\n   - 表面根据法线采样 → 漫反射环境色\n   - UE5 用 Sky Light 提供此数据\n\n2. **Specular IBL（镜面反射环境光）**：\n   - **Prefiltered Environment Map**：按 roughness 分级的 Cubemap mipmap\n     - roughness 0 → mip 0（锐利反射）\n     - roughness 1 → 最高 mip（模糊反射）\n   - 配合 **BRDF LUT**（2D 查找表）：根据 N·V 和 roughness 给出反射强度\n   - 公式：`spec_ambient = PrefilteredEnv.Sample(reflect_dir, roughness_mip) * BRDF_LUT.Sample(NdotV, roughness)`\n\n**UE5 实现**：\n\n- **Sky Light**：\n  - 自动从天空盒 / HDRI 采样生成 IBL\n  - 提供 Diffuse IBL（SH）和 Specular IBL（Prefiltered Map）\n  - 实时或烘焙模式可选\n\n- **Reflection Capture（反射捕捉）**：\n  - `Sphere Reflection Capture` / `Box Reflection Capture`\n  - 烘焙或实时生成 Cubemap\n  - 替代 Unity Reflection Probe\n  - 物体在多个 Capture 间插值过渡\n\n- **HDRI Backdrop**：\n  - UE5 插件，直接用 HDRI 贴图作天空和光源\n  - 适合产品渲染、汽车展示\n\n- **Lumen**：\n  - UE5 动态 GI 自动处理 IBL\n  - Sky Light + Lumen 无需烘焙即可实时反射\n\n**优化**：\n- Reflection Capture 数量控制（每房间 1 个）\n- Capture 分辨率：256（默认），重要场景 512\n- 移动端：只用 SH，不用 Prefiltered Map\n- Sky Light 用 `SLS_SpecifiedCubemap` 烘焙模式省开销\n\n**和 Unity 对比**：Unity URP/HDRP 用 Reflection Probe + Skybox；UE5 用 Sky Light + Reflection Capture + HDRI Backdrop，配合 Lumen 可全动态，无需手动烘焙。\n\n**面试加分点**：能讲清 `Reflection Capture` 的 Box/Sphere 两种形状的投影差异，以及 Lumen 的 Surface Cache 如何替代传统 Prefiltered Map。",
+      "tags": [
+        "IBL",
+        "PBR",
+        "SkyLight",
+        "ReflectionCapture",
+        "UE5"
+      ]
+    },
+    {
+      "id": "lighting_009",
+      "category": "lighting",
+      "difficulty": "hard",
+      "question": "实时全局光照（Realtime GI）有哪些方案？分别适合什么场景？",
+      "answer": "**实时 GI 方案**：\n\n1. **Enlighten（UE5 旧）**：\n   - 预计算场景的辐射度传递\n   - 运行时模拟光照变化（如昼夜）\n   - 缺点：预计算极慢，质量一般\n   - 已逐步弃用\n\n2. **DDGI（Dynamic Diffuse Global Illumination）**：\n   - 网格化的 Irradiance Volume\n   - 实时更新 SH 探针\n   - 漫反射 GI，效果不错\n   - Unreal 5 Lumen 底层用类似技术\n\n3. **Lumen（UE5）**：\n   - 表面缓存 + 屏幕空间光线追踪 + Voxel 追踪\n   - 1 bounce 真实漫反射 GI\n   - 性能开销大，但效果惊艳\n   - 适合中高端 PC/主机\n\n4. **RTGI（Ray Traced GI）**：\n   - 硬件光线追踪计算 GI\n   - 多次反射，质量最高\n   - 需要 RTX / RDNA2 等支持硬件 RT 的 GPU\n   - 适合 PC 高端、PS5/XSX\n\n5. **SSGI / SSDO（屏幕空间）**：\n   - 屏幕空间近似 GI\n   - 性能开销小\n   - 屏幕外信息缺失\n   - 适合所有平台，作为 RTGI 后备\n\n6. **Voxel GI / VXGI**：\n   - 把场景体素化，体素光锥追踪\n   - 中等开销，效果中等\n   - 已较少使用\n\n7. **Light Propagation Volume（LPV）**：\n   - 把光在 3D 网格中传播\n   - CryEngine 早期方案，质量一般\n\n**选型建议**：\n\n| 项目类型 | 推荐 GI |\n|---------|--------|\n| 移动端 MMO | 烘焙 Lightmap + Light Probe |\n| 移动端开放世界 | DDGI 简化版 / Lightmap |\n| PC 中端 | Shadowmask + SSGI |\n| PC 高端 | Lumen / RTGI |\n| PS5/XSX | Lumen / RTGI |\n| VR | 烘焙（不能用动态 GI） |\n\n**坑**：\n- 实时 GI 移动端几乎不可用（开销太大）\n- 动态物体（破坏、可移动）需要实时光照，烘焙不适用\n- 多次反射 vs 1 次反射：质量差异大，性能差异也大",
+      "tags": [
+        "实时GI",
+        "Lumen",
+        "RTGI",
+        "DDGI",
+        "SSGI"
+      ]
+    },
+    {
+      "id": "lighting_010",
+      "category": "lighting",
+      "difficulty": "hard",
+      "question": "UE5 怎么优化灯光数量？移动端灯光预算怎么定？",
+      "answer": "**UE5 优化思路**：\n\n1. **减少实时灯光数量**：\n   - 移动端（Forward 渲染器）：每帧总光源数 < 4（`r.Mobile.MaxLightsPerPass`）\n   - 关键光 1-2 个 per-pixel，其他烘焙\n   - 静态光源：烘焙到 Lightmap（`Light Mobility = Static`）\n   - 装饰光源（霓虹灯）：用 Emissive Material + Bloom 模拟\n\n2. **光源范围控制**：\n   - Point/Spot Light 设置合理 `Attenuation Radius`\n   - 范围重叠导致 pixel light 数量激增\n   - UE5 Forward+ 用 Cluster 自动剔除\n\n3. **光源合并**：\n   - 多个小灯（灯带）合成一个大 Rect Light + Light Function\n   - `Light Function` 用贴图模拟复杂光形，替代 Unity Cookie\n\n4. **光照混合模式（Light Mobility）**：\n   - **Static**：完全烘焙，运行时零开销\n   - **Stationary**：直接光实时，间接光烘焙（性价比最高）\n   - **Movable**：完全实时，开销最大但灵活\n   - 推荐：场景静态光用 Static，主光用 Stationary\n\n5. **Forward+（Cluster Forward）**：\n   - UE5 PC/主机用 Forward+ 渲染器\n   - 网格化光源剔除，支持几十上百光源\n   - 替代 Unity URP Forward+ 的 Per Pixel Light Count\n   - `r.Forward.LightCullingQuality` 控制质量\n\n**移动端灯光预算**：\n\n```\n全场景（同时渲染）：\n  - 实时主光（Directional）：1（必须）\n  - 实时辅光（Point/Spot）：≤ 3（per-pixel）\n  - 烘焙光：无限（Lightmap）\n  - Sky Light：1（提供 IBL）\n\n每物体最多接收：\n  - 主光 1\n  - 额外光 2-4\n  - 总光照计算 cost 控制在 1ms 内\n```\n\n**性能开销参考**（移动端）：\n\n| 操作 | 帧时间 |\n|------|--------|\n| 1 个主光（Directional + CSM） | 1-2 ms |\n| 1 个 Point Light | 0.3-0.5 ms |\n| 1 个 Spot + Shadow | 0.8-1.2 ms |\n| 烘焙 Lightmap | 0 ms |\n| Sky Light（烘焙） | < 0.2 ms |\n\n**优化技巧**：\n- **Bake 静态灯光**：场景 90% 的灯烘焙\n- **Light Function**：模拟复杂光形，比真实光源便宜\n- **Rect Light + Lumen**：PC 端替代多个 Point Light\n- **Lightmass Importance Volume**：烘焙质量集中区域\n- **Stationary Shadow**：用 Distance Field Shadow 做远距离阴影\n\n**和 Unity 对比**：Unity URP 用 `Per Pixel Light Count` 限制；UE5 Forward+ 用 Cluster 自动剔除，移动端 Forward 用 `r.Mobile.MaxLightsPerPass` 限制，更底层可控。\n\n**面试加分点**：能讲清 Stationary 光的 `Indirect Lighting Cache` 和 `Volume Samples` 机制，以及 Lumen 开启时静态光也能产生动态反射的权衡。",
+      "tags": [
+        "灯光优化",
+        "移动端",
+        "预算",
+        "Forward+",
+        "UE5"
+      ]
+    }
+  ]
+}

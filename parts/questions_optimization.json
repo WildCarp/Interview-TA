@@ -1,0 +1,377 @@
+[
+  {
+    "id": "optimization-001",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "性能优化的整体方法论？先做什么？",
+    "answer": "核心原则：**测量驱动，不盲目优化**。\n\n**流程**：\n1. **确立目标和预算**：目标帧率（60FPS=16.67ms）、平台（PC/移动）、内存上限。\n2. **测量现状**：Profiler 抓帧，看 CPU/GPU/内存。\n3. **定位瓶颈**：\n   - CPU bound？看 Update/draw call/物理/GC。\n   - GPU bound？看 vertex/fragment/overdraw/带宽。\n   - 内存 bound？看资源/泄漏。\n4. **针对最大瓶颈优化**（80/20 法则）。\n5. **验证优化效果**：重测对比。\n6. **记录 before/after**：供团队参考。\n7. **持续监控**：上线后 telemetry。\n\n**关键原则**：\n- 先优化最大瓶颈，不要小修小补。\n- 一次只改一个变量，便于验证。\n- 平台分级（PC/移动/低端）。\n- 性能预算管理（每模块分配 ms）。\n- 不要过早优化（先功能后性能）。\n\n**工具链**：\n- UE5 Profiler（CPU/GPU/Memory）。\n- Frame Debugger（draw call）。\n- Memory Profiler（内存）。\n- RenderDoc（GPU 指令）。\n- 平台工具（Snapdragon/Xcode）。\n- 真机测试（不只编辑器）。\n\n**常见误区**：\n- 编辑器性能 ≠ 真机性能。\n- 优化 PC 不代表移动优化。\n- 只看平均帧率，忽略卡顿（1% low）。",
+    "tags": [
+      "方法论",
+      "优化",
+      "Profiler"
+    ]
+  },
+  {
+    "id": "optimization-002",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 Profiler 怎么用？CPU 和 GPU Profiler 的区别？",
+    "answer": "**CPU Profiler**：\n- 看主线程每帧耗时。\n- 按模块分：Update/Physics/Rendering/Animation/Audio/GC。\n- 找耗时高的函数。\n- 看 GC Alloc（GC 垃圾）。\n- 看 draw call 数（Rendering）。\n\n**GPU Profiler**：\n- 看每帧 GPU 耗时。\n- 按 pass 分：Shadow/Opaque/Transparent/Post Processing。\n- 看每 pass 的 draw call 和耗时。\n- 需要平台支持（移动端部分不支持）。\n\n**使用**：\n1. Window > Analysis > Profiler。\n2. 连接真机（Android/iOS）测，不只编辑器。\n3. 录制一段游戏，抓帧。\n4. 看哪帧卡顿，放大分析。\n5. 用 Hierarchy 视图看调用栈。\n\n**关键指标**：\n- Main Thread 耗时（<16.67ms 60FPS）。\n- Render Thread 耗时。\n- GPU 耗时。\n- GC Alloc（每帧应 <1KB）。\n- draw call 数。\n- Batch 数。\n\n**技巧**：\n- Deep Profile（深度分析，慢但准）。\n- Profile Editor（编辑器也测）。\n- Recorder（录制指标）。\n- Profiler Marker（代码标记）。\n\n**限制**：\n- 编辑器开销大，真机更准。\n- GPU Profiler 部分移动平台不支持，用 RenderDoc/Snapdragon 补充。\n- Profiler 本身影响性能（侵入式）。",
+    "tags": [
+      "Profiler",
+      "CPU",
+      "GPU"
+    ]
+  },
+  {
+    "id": "optimization-003",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 中 Draw Call 数过高的常见原因和优化手段？",
+    "answer": "**常见原因**：\n1. 材质数过多：每个材质段（Material Element）触发一次 draw call\n2. Mesh 实例多：每个 StaticMeshComponent 一次 draw call\n3. 透明物体：需排序，无法合批\n4. 多 Pass：阴影、深度、PrePass 都额外增加 draw call\n5. 实时阴影：投射阴影的物体产生额外 shadow pass\n\n**UE5 优化手段**：\n\n**1. ISM / HISM（实例化静态网格）**：\n- `InstancedStaticMeshComponent`：相同 mesh+材质自动 GPU Instancing\n- `HierarchicalInstancedStaticMeshComponent`：支持 LOD 和剔除，适合草、树、石头\n- 替代 Unity 的 GPU Instancing + 静态合批\n\n**2. Merge Actor（合并网格）**：\n- 编辑器 Tools → Merge Actors\n- 静态场景合并为单个 StaticMesh，减 draw call\n- 类似 Unity Static Batching\n\n**3. Mesh Draw Pipeline（自动 Batching）**：\n- UE5 自动按材质/网格分组，动态批合并相同 shader 的绘制\n- 替代 Unity SRP Batcher，无需手动配置\n\n**4. 减少材质数**：\n- 通道打包（ORM）\n- 纹理图集\n- 一个 mesh 尽量少用多材质 slot\n\n**5. MID（Material Instance Dynamic）**：\n- 用 `CreateDynamicMaterialInstance` 修改参数而不打断 batch\n- 替代 Unity MaterialPropertyBlock\n\n**6. 阴影优化**：\n- 不投影的物体关 CastShadow\n- 调整 `Shadow Distance` / CSM 级数\n\n**预算**：移动 <300 draw call，PC <3000-5000。\n\n**和 Unity 对比**：Unity 需手动开 SRP Batcher/GPU Instancing；UE5 的 Mesh Draw Pipeline 默认自动优化，ISM/HISM 是原生组件，使用更自然。\n\n**面试加分点**：能说出 ISM 和 HISM 的区别（HISM 支持 LOD 和视锥剔除），以及 `r.MeshDrawCommands.DynamicInstancing` cvar 控制动态合批。",
+    "tags": [
+      "DrawCall",
+      "ISM",
+      "HISM",
+      "MeshDrawPipeline",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-004",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "内存优化怎么入手？常见内存大户？",
+    "answer": "内存大户：\n1. **纹理**：占 50-70%。大贴图、未压缩、mipmap 多。\n2. **Mesh**：高模、未压缩、多个 LOD 全加载。\n3. **音频**：未压缩音频、长音乐。\n4. **动画**：动画 clip、骨骼绑定。\n5. **字体**：中文字体 atlas 大。\n6. **AB 包**：未卸载、依赖冗余。\n7. **RenderTexture**：全屏 RT、未释放。\n8. **对象池**：池过大。\n9. **GC**：托管堆碎片。\n10. **shader**：变体多。\n\n**优化流程**：\n\n**1. 测量**：\n- Memory Profiler 抓快照。\n- 看各类资源占用。\n- 对比进入/退出界面内存。\n\n**2. 纹理优化**：\n- 压缩（ASTC/BC7）。\n- 尺寸控制（不要超 2048）。\n- mipmap（UI 关，场景开）。\n- Read/Write 关闭。\n- 按需加载（AB）。\n\n**3. Mesh 优化**：\n- 压缩（Mesh Compression）。\n- Read/Write 关闭。\n- LOD（远处低模）。\n- 按需加载。\n\n**4. 音频优化**：\n- 短音效用压缩（Vorbis）。\n- 长音乐流式播放（Streaming）。\n- 采样率降（22kHz 够）。\n\n**5. 资源生命周期**：\n- 进入加载，退出卸载。\n- 引用计数。\n- Resources.UnloadUnusedAssets。\n\n**6. 对象池**：\n- 池容量合理。\n- 不用时释放。\n\n**7. GC 优化**：\n- 避免频繁分配。\n- 减少 GC Alloc。\n- 值类型代替引用类型。\n\n**预算**：移动 <500MB-1GB，PC <2-4GB。",
+    "tags": [
+      "内存",
+      "优化",
+      "资源"
+    ]
+  },
+  {
+    "id": "optimization-005",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "GC（垃圾回收）优化？怎么避免 GC 卡顿？",
+    "answer": "GC 问题：\n- 频繁分配内存 → GC 频繁触发。\n- GC 暂停所有线程 → 卡顿。\n- 堆碎片 → 内存不足。\n\n**GC Alloc 来源**：\n1. **foreach**（旧版本，迭代器分配）。\n2. **string 拼接**（+ 产生新 string）。\n3. **LINQ**（产生临时集合）。\n4. **lambda 捕获**（闭包分配）。\n5. **boxing**（值类型转 object）。\n6. **new**（每帧 new 对象）。\n7. **协程 yield return new**。\n8. **数组访问**（部分情况）。\n\n**优化**：\n\n**1. 避免每帧分配**：\n- 缓存对象（成员变量）。\n- 对象池。\n- 预分配数组。\n\n**2. string 优化**：\n- 用 StringBuilder。\n- 避免每帧拼接。\n- 字符串插值 `$\"\"` 仍分配，谨慎。\n\n**3. 避免闭包**：\n- 不捕获局部变量。\n- 用方法引用代替 lambda。\n\n**4. 避免 boxing**：\n- 用泛型集合代替 ArrayList。\n- 不要把值类型转 object。\n\n**5. 协程优化**：\n- `yield return null` 代替 `yield return new WaitForSeconds`。\n- 缓存 WaitForSeconds 实例。\n\n**6. 值类型**：\n- struct 代替 class（栈分配）。\n- 但要注意 struct 拷贝开销。\n\n**7. 数组优化**：\n- 用 `for` 代替 `foreach`（旧版本）。\n- 预分配 List 容量。\n\n**8. 手动 GC**：\n- `System.GC.Collect()` 在合适时机（加载时）。\n- 不要每帧调。\n\n**测量**：\n- Profiler 看 GC Alloc。\n- 目标 <1KB/帧。\n- 找 GC Alloc 高的函数修。",
+    "tags": [
+      "GC",
+      "垃圾回收",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-006",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "Skinned Mesh（蒙皮网格）的性能优化？",
+    "answer": "蒙皮开销：\n- 每顶点计算骨骼权重影响。\n- CPU 蒙皮：主线程算，多角色卡。\n- GPU 蒙皮：shader 里算，省 CPU。\n\n**优化**：\n\n**1. GPU 蒙皮**：\n- UE5 默认 GPU 蒙皮（Quality Settings）。\n- 骨骼矩阵传 shader，顶点 shader 算蒙皮。\n- 省 CPU，GPU 略增。\n\n**2. 减面**：\n- 角色高模 LOD。\n- 远距离用低模。\n- 法线贴图代替高模细节。\n\n**3. 减骨骼数**：\n- 主角色 50-100 骨骼。\n- 路人 20-30 骨骼。\n- 简化 rig。\n\n**4. 减动画 Blend**：\n- blend 层多 → 计算多。\n- 只必要层。\n\n**5. 动画 LOD**：\n- 远距离降动画频率（隔帧更新）。\n- 远距离简化动画。\n- 不可见不播动画。\n\n**6. Optimize Bones**：\n- 移除不影响 mesh 的骨骼。\n- UE5 的 Optimize Bone 选项。\n\n**7. Optimize Game Objects**：\n- Animator 的 Optimize Transform Hierarchy。\n- 移除不必要的 Transform 节点。\n- 减层级更新开销。\n\n**8. 蒙皮烘焙**：\n- 静态角色（NPC 站立）烘焙成普通 mesh。\n- 不实时蒙皮。\n\n**9. 减少 SkinnedMeshRenderer**：\n- 合并角色的多个 SkinnedMesh（同骨骼）。\n- 换装系统优化。\n\n**10. 不可见暂停**：\n- 角色不在屏幕 → 暂停动画 + 蒙皮。\n- `SkinnedMeshRenderer.updateWhenOffscreen = false`。",
+    "tags": [
+      "蒙皮",
+      "SkinnedMesh",
+      "动画"
+    ]
+  },
+  {
+    "id": "optimization-007",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "物理系统的性能优化？",
+    "answer": "物理开销：\n- FixedUpdate 计算（每固定帧）。\n- 碰撞检测（O(n²) 或 BVH）。\n- 接触点求解。\n- Rigidbody 交互。\n\n**优化**：\n\n**1. 简化 Collider**：\n- 用基本形状（Box/Capsule/Sphere）代替 Mesh Collider。\n- Mesh Collider 贵，少用。\n- 复杂形状用组合基本 Collider。\n\n**2. Layer Collision Matrix**：\n- 配置哪些层互相碰撞。\n- 关闭不必要的层交互。\n- 减少碰撞对数。\n\n**3. Fixed Timestep**：\n- 调大 FixedUpdate 间隔（0.02 → 0.033）。\n- 物理精度下降但省 CPU。\n- 移动端可降。\n\n**4. 最大子步数**：\n- Maximum Allowed Timestep 限制物理单帧最大时间。\n- 防止物理卡顿拖累。\n\n**5. Rigidbody 优化**：\n- 静态物体用 Static Collider（无 Rigidbody）。\n- 动态用 Rigidbody。\n- Is Kinematic：受脚本控制，不受物理影响（省）。\n\n**6. Sleep 机制**：\n- 不动的 Rigidbody 自动 sleep。\n- 不要频繁唤醒。\n\n**7. 碰撞剔除**：\n- 远距离物体不参与物理。\n- 按区域分块物理。\n\n**8. 物理场景分块**：\n- 大世界分多个物理场景。\n- 只激活附近场景。\n\n**9. 简化物理材质**：\n- 少用复杂的物理材质（摩擦、弹性）。\n\n**10. 触发器代替碰撞**：\n- 只检测重叠用 Trigger（无物理响应）。\n- 便宜。\n\n**移动端**：\n- 减少 Rigidbody 数（<50）。\n- 简化 Collider。\n- 降低物理频率。",
+    "tags": [
+      "物理",
+      "Physics",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-008",
+    "category": "optimization",
+    "difficulty": "高级",
+    "question": "Job System 和 Burst Compiler 怎么用？适合什么场景？",
+    "answer": "Job System：\n- UE5 的多线程任务系统。\n- 安全（无数据竞争，编译期检查）。\n- 配合 Burst 编译器，C# 编译成原生 SIMD 代码。\n\n**Burst**：\n- LLVM 后端，C# → 优化机器码。\n- 性能接近 C++。\n- SIMD 自动向量化。\n- 限制：不能访问 UE5 API（GameObject、Transform 等），只处理数据。\n\n**使用**：\n```csharp\nusing UE5.Burst;\nusing UE5.Jobs;\nusing UE5.Collections;\n\n[BurstCompile]\npublic struct MyJob : IJobParallelFor {\n  public NativeArray<float> data;\n  public float multiplier;\n  \n  public void Execute(int i) {\n    data[i] *= multiplier;\n  }\n}\n\n// 调用\nvar data = new NativeArray<float>(1000, Allocator.TempJob);\nvar job = new MyJob { data = data, multiplier = 2f };\nvar handle = job.Schedule(1000, 64);\nhandle.Complete();\ndata.Dispose();\n```\n\n**适合场景**：\n1. **大量数据计算**：粒子、顶点、流场。\n2. **数学密集**：物理、碰撞、路径寻找。\n3. **并行**：独立数据并行处理。\n4. **不需要 UE5 API**：纯数据计算。\n\n**不适合**：\n- 需要访问 GameObject/Component（用 ECS 或回调）。\n- 简单逻辑（Job 调度开销大于收益）。\n- 需要主线程同步的场景。\n\n**ECS（Entity Component System）**：\n- 配合 Job/Burst 的架构。\n- 数据导向，缓存友好。\n- 大量实体高效。\n- UE5 DOTS（Data-Oriented Tech Stack）。\n\n**性能提升**：\n- Job + Burst 比单线程 C# 快 10-50 倍。\n- 适合性能瓶颈在 CPU 计算的场景。",
+    "tags": [
+      "Job",
+      "Burst",
+      "DOTS",
+      "多线程"
+    ]
+  },
+  {
+    "id": "optimization-009",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 资源加载优化？同步 vs 异步 vs 预加载？",
+    "answer": "**UE5 加载方式**：\n\n**1. 同步加载（LoadObject / LoadPackage）**：\n- `LoadObject<UTexture2D>(nullptr, TEXT(\"/Game/Art/T_Wall.T_Wall\"))`\n- 阻塞主线程，卡顿\n- 只适合小资源或启动时\n\n**2. 异步加载（StreamableManager / LoadPackageAsync）**：\n- `FStreamableManager::RequestAsyncLoad`，分帧加载\n- `UAssetManager::LoadPrimaryAsset` 异步 API\n- 推荐，不卡主线程\n\n**3. Pak / Chunk 分包**：\n- 替代 Unity AssetBundle/Addressables\n- `FPakFile` 挂载 pak 包，按 Chunk 下载\n- 配合 `UAssetManager` 管理依赖和生命周期\n\n**优化策略**：\n\n**1. 预加载**：\n- 启动加载核心资源（HUD、主菜单）\n- 进入关卡前预加载（Loading 界面）\n\n**2. 分帧加载**：\n- `RequestAsyncLoad` 内部分帧\n- 优先级排序（先重要的）\n\n**3. 按需加载**：\n- PrimaryAsset 体系：进入区域才加载\n- 退出卸载，引用计数管理\n- `UAssetManager::ChangeBundleStateForPrimaryAssets`\n\n**4. 资源卸载**：\n- `UAssetManager::UnloadPrimaryAsset`\n- GC 回收 UObject（`CollectGarbage`）\n- Pak 卸载：`FPakPlatformFile::Unmount`\n\n**5. Level Streaming**：\n- 大世界分关卡流式加载\n- `ULevelStreaming::SetShouldBeLoaded`\n\n**6. 资源压缩**：\n- 纹理 ASTC/BC7\n- Pak 可整体压缩\n\n**测量**：Unreal Insights 看加载耗时，`stat AssetManager` 看资产状态。\n\n**和 Unity 对比**：Unity 用 Addressables 封装 AB；UE5 用 Pak + UAssetManager 原生集成，依赖图由 Asset Registry 自动管理，无需手动处理 AB 依赖。\n\n**面试加分点**：能讲清 PrimaryAsset / Bundle / Chunk 三层关系，以及 `FStreamableHandle` 的引用计数生命周期管理。",
+    "tags": [
+      "加载",
+      "异步",
+      "Pak",
+      "AssetManager",
+      "StreamableManager"
+    ]
+  },
+  {
+    "id": "optimization-010",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 移动端渲染优化策略？和 PC 的区别？",
+    "answer": "**移动 GPU 特点**：算力弱、带宽有限、TBR 架构、内存 <1GB。\n\n**UE5 移动端优化**：\n\n**1. 渲染管线选择**：\n- 移动用 **Forward（Mobile）** 渲染器，不用 Deferred\n- PC/主机用 **Deferred + Lumen + Nanite**\n- 移动端关 Lumen、Nanite，用烘焙 GI\n- 替代 Unity URP/HDRP 选型\n\n**2. Shader 优化**：\n- Material Editor 简化 ALU（移动 <300 指令）\n- half 精度（`float` → `half`）\n- 减少纹理采样（<4）\n- 避免动态分支\n\n**3. 纹理优化**：\n- ASTC 压缩（6×6 / 4×4）\n- 尺寸控制（<1024 单张）\n- mipmap（场景开，UI 关）\n- Texture Streaming（`r.Streaming.PoolSize`）\n\n**4. 几何优化**：\n- LOD（`AutoLOD` 自动生成）\n- ISM/HISM 实例化（草、树）\n- 移动端角色 <10 万面\n\n**5. Overdraw 控制**：\n- 移动 ≤3 层\n- Early-Z（`EarlyZPass`）\n- AlphaTest 优先于 AlphaBlend\n\n**6. Draw Call 控制**：\n- 移动 <300\n- ISM/HISM + Merge Actor 合并\n\n**7. 后处理精简**：\n- 移动只 Bloom（降分辨率）+ Color Grading\n- 关 SSR、SSAO、DOF、Motion Blur\n- Post Process Volume 控制开销\n\n**8. 光照简化**：\n- 单主光 + 烘焙 GI\n- 关阴影或简化（1 级 CSM）\n- 移动端 Static Light 为主\n\n**9. Device Profile 分级**：\n- `DeviceProfiles.ini` 配置各机型参数\n- 高端机开更多特性，低端机降级\n- 替代 Unity SystemInfo 检测\n\n**和 PC 区别**：PC 重 GPU 算力可 Deferred + Lumen；移动重带宽必须 Forward + 烘焙；PC 可全屏后处理，移动精简。\n\n**面试加分点**：能说出移动 Forward 的 Light Cull 策略（`r.Mobile.MaxLightsPerPass`），以及 `r.Mobile.AntiAliasing` 选择（FXAA vs MSAA）的权衡。",
+    "tags": [
+      "移动端",
+      "Forward",
+      "DeviceProfile",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-011",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "真机测试和编辑器测试的差异？为什么必须真机？",
+    "answer": "差异：\n\n**1. 性能**：\n- 编辑器有额外开销（Inspector、Gizmos、Editor 代码）。\n- 真机更接近真实性能。\n- 编辑器可能比真机快（PC 比移动强）或慢（编辑器开销）。\n\n**2. GPU**：\n- 编辑器用 PC GPU（IMR）。\n- 真机移动用 Mali/Adreno/Apple（TBR/TBDR）。\n- 行为可能不同（精度、扩展支持）。\n- shader 在编辑器 OK，真机可能崩。\n\n**3. 内存**：\n- 真机内存有限。\n- 编辑器可能有预留。\n- 真机易 OOM。\n\n**4. API**：\n- 编辑器 DX/Metal。\n- 真机 GLES/Vulkan/Metal。\n- 行为差异（如 SceneTexture 抓屏、Compute Shader 支持）。\n\n**5. 分辨率**：\n- 真机屏幕各种分辨率。\n- DPI 不同。\n- 适配测试。\n\n**6. 输入**：\n- 真机触摸。\n- 编辑器鼠标。\n- 交互差异。\n\n**7. 散热**：\n- 真机长时间运行降频（thermal throttling）。\n- 编辑器无此问题。\n- 真机测长时间稳定性。\n\n**8. 网络**：\n- 真机移动网络（延迟、丢包）。\n- 编辑器本地。\n\n**真机测试要点**：\n- 多机型覆盖（低/中/高端）。\n- 多分辨率。\n- 长时间运行（泄漏、降频）。\n- 真实场景测试（不只 demo）。\n- Profiler 连真机测。\n- GPU 工具（Snapdragon/Xcode）。\n\n**误区**：\n- 只测高端机（用户多用中低端）。\n- 只测短时间（忽略降频/泄漏）。\n- 编辑器优化好就以为真机好。",
+    "tags": [
+      "真机",
+      "测试",
+      "移动端"
+    ]
+  },
+  {
+    "id": "optimization-012",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "性能预算（Performance Budget）怎么制定和执行？",
+    "answer": "制定原则：\n\n**1. 帧率目标**：\n- 60FPS = 16.67ms/帧。\n- 30FPS = 33.33ms/帧。\n- 移动端 60FPS 难，可降 30FPS。\n\n**2. 总预算分配**：\n- CPU：8-10ms。\n- GPU：6-8ms。\n- VSync 等待：剩余。\n\n**3. 模块预算**：\n| 模块 | CPU | GPU |\n|------|-----|-----|\n| 渲染 | 2ms | 6ms |\n| 物理 | 1ms | - |\n| 动画 | 1ms | - |\n| AI | 1ms | - |\n| 脚本 | 2ms | - |\n| UI | 1ms | 1ms |\n| GC | 0.5ms | - |\n\n**4. 资源预算**：\n- draw call：移动 <200。\n- 内存：移动 <1GB。\n- 纹理：移动 <300MB。\n- 三角形：移动 <100k/帧。\n\n**执行**：\n\n**1. 文档化**：\n- 性能预算文档。\n- 每模块/资源的限制。\n- 分发给团队。\n\n**2. 自动检查**：\n- 编辑器脚本检查资源规格。\n- CI 检查（构建时）。\n- 违反预算报警。\n\n**3. Review 流程**：\n- 提交前自检。\n- TA Review 核对预算。\n- 超预算不通过。\n\n**4. 性能监控**：\n- Profiler 定期跑。\n- 真机测试。\n- Telemetry 上报。\n\n**5. 优先级**：\n- 超预算时按优先级砍。\n- 核心体验保，装饰砍。\n\n**6. 分级**：\n- 高/中/低配不同预算。\n- 自动降级。\n\n**好处**：\n- 团队目标统一。\n- 早发现问题。\n- 避免后期重构。",
+    "tags": [
+      "性能预算",
+      "Budget",
+      "管理"
+    ]
+  },
+  {
+    "id": "optimization-013",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "动画系统的性能优化？",
+    "answer": "动画开销：\n- 采样动画 clip（每帧）。\n- Blend（层/混合）。\n- IK（反向运动学）。\n- 蒙皮（见 SkinnedMesh 优化）。\n\n**优化**：\n\n**1. 动画 LOD**：\n- 远距离降动画频率（隔帧）。\n- 远距离简化动画（关键帧减少）。\n- 不可见不播动画。\n\n**2. 减少动画层**：\n- 每层 blend 增开销。\n- 只必要层。\n\n**3. 减少混合**：\n- blend 复杂（2D/3D blend tree）。\n- 简化状态机。\n\n**4. 关闭 IK**：\n- IK 贵。\n- 不必要时关。\n\n**5. 动画压缩**：\n- UE5 动画压缩（Keyframe Reduction）。\n- 减少关键帧。\n- 误差容忍内最大压缩。\n\n**6. Humanoid vs Generic**：\n- Humanoid 支持重定向，但贵。\n- Generic 便宜。\n- 不需要重定向用 Generic。\n\n**7. Optimize Game Objects**：\n- Animator 选项。\n- 移除不必要 Transform。\n- 减层级更新。\n\n**8. 动画事件优化**：\n- 事件少用。\n- 不要每帧触发。\n\n**9. Avatar 优化**\n- 简化 Avatar 骨骼 mask。\n- 不动的部位 mask 掉。\n\n**10. 批量角色**：\n- 多角色用 GPU Instancing + 动画纹理（Animation Texture Baking）。\n- 顶点 shader 采样动画纹理，无 Animator。\n\n**移动端**：\n- 角色 <50 骨骼。\n- 动画压缩。\n- 远距离降级。",
+    "tags": [
+      "动画",
+      "Animation",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-014",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "Overdraw 优化的具体手段？",
+    "answer": "Overdraw：同像素多次写入，浪费填充率。\n\n**优化手段**：\n\n**1. 不透明物体优化**：\n- 开 ZWrite On + ZTest LEqual。\n- Early-Z 自动剔除被挡片元。\n- 按 Front-to-Back 排序（近的先画，远的被 Early-Z 剔除）。\n- UE5 自动按距离排序不透明。\n\n**2. Z-Prepass**：\n- 先用简化 shader 只写深度。\n- 再用完整 shader 渲染，Early-Z 高效剔除。\n- 适合：复杂 shader + 高 overdraw（植被、密集几何）。\n- 代价：多一次 draw call。\n\n**3. AlphaTest 代替 AlphaBlend**：\n- AlphaTest（clip）：硬边，可 Early-Z。\n- AlphaBlend：软边，不能 Early-Z。\n- 树叶、栅栏用 AlphaTest。\n\n**4. 减少透明物体**：\n- 透明物体不能 Early-Z。\n- 减少透明层。\n- 用 AlphaTest 或不透明。\n\n**5. 透明物体排序**：\n- 从后到前排序（视觉正确）。\n- 减少穿插。\n- 但不能减 overdraw。\n\n**6. 粒子优化**：\n- 减少粒子数。\n- Alpha clip（硬边）。\n- 远距离剔除。\n- Additive 代替 AlphaBlend（无需排序，但仍 overdraw）。\n\n**7. 后处理降采样**：\n- Bloom、SSAO 等降半分辨率。\n- 减少全屏 overdraw。\n\n**8. LOD**：\n- 远距离简化 shader（减纹理采样）。\n- 远距离减少特效。\n\n**9. 剔除**：\n- 视锥外的物体不渲染。\n- 被遮挡的物体剔除。\n\n**10. UI Overdraw**：\n- 减少 UI 层级。\n- 隐藏不可见 UI。\n- 合并装饰层。\n\n**检测**：Scene 视图 Overdraw 模式，看每像素覆盖次数。",
+    "tags": [
+      "Overdraw",
+      "优化",
+      "EarlyZ"
+    ]
+  },
+  {
+    "id": "optimization-015",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "Shader 性能分析工具？怎么定位 shader 瓶颈？",
+    "answer": "工具：\n\n**1. UE5 Shader Complexity**：\n- Scene 视图 Display Mode → Shader Complexity。\n- 颜色：绿（低）→ 黄（中）→ 红（高）→ 白（极高）。\n- 看哪些物体 shader 复杂。\n\n**2. Frame Debugger**：\n- 看 draw call 数、Pass 数。\n- 找多余的 Pass。\n\n**3. RenderDoc**：\n- 抓帧，看每个 draw call。\n- shader 代码（反编译）。\n- 纹理采样次数、寄存器占用。\n- Pipeline State（状态）。\n\n**4. Mali Offline Compiler**：\n- 编译 shader 看指令数、寄存器数。\n- 预估移动 GPU 性能。\n- 不需真机。\n\n**5. Snapdragon Profiler**：\n- 真机 GPU 耗时。\n- shader 指令级分析。\n\n**6. Xcode GPU Capture**：\n- iOS 真机 GPU 分析。\n- Apple GPU 专用。\n\n**定位瓶颈**：\n\n**1. 看 Shader Complexity**：\n- 红色 = shader 复杂，需优化。\n- 绿色 = 不是 shader 问题。\n\n**2. 看纹理采样数**：\n- RenderDoc 看 shader 采样次数。\n- 移动 >4 次要优化。\n\n**3. 看指令数**：\n- Mali Offline Compiler 看 ALU 指令。\n- 移动 >300 要简化。\n\n**4. 看寄存器数**：\n- 寄存器多 → occupancy 低（并行少）。\n- 优化后寄存器应减少。\n\n**5. 看分支**：\n- 动态分支贵。\n- 用 step/lerp 替代。\n\n**6. 看精度**：\n- float 改 half。\n\n**7. 实验**：\n- 简化 shader 测帧率（确认 shader 是瓶颈）。\n- 降分辨率测（片元瓶颈则帧率升）。",
+    "tags": [
+      "Shader",
+      "分析",
+      "工具"
+    ]
+  },
+  {
+    "id": "optimization-016",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 CPU 优化的常见手段？",
+    "answer": "**CPU 瓶颈来源**：Draw Call 提交、蒙皮/动画、物理、GameThread 逻辑、GC、资源加载。\n\n**UE5 优化手段**：\n\n**1. Draw Call 优化**：\n- ISM/HISM 实例化\n- Merge Actor 合并静态网格\n- Mesh Draw Pipeline 自动 Batching\n- 减少材质 slot\n\n**2. 蒙皮 GPU 化**：\n- UE5 默认 GPU 蒙皮（`SkeletalMesh` 的 Skin Weights）\n- `r.SkinCache.Mode` 开启 Skin Cache\n- 省主线程\n\n**3. 物理优化**：\n- 简化 Collision（Box/Sphere/Capsule 代替 Convex）\n- `Collision Preset` 关闭不必要的通道\n- 物理 Substep 控制（`Substepping`）\n\n**4. GameThread 优化**：\n- 避免每帧 `GetComponent`（缓存指针）\n- 避免每帧 `FindObject`（用 UPROPERTY 引用）\n- 关闭不可见 Actor 的 Tick（`SetActorTickEnabled`）\n- 按频率分组 Tick（`TickGroup`）\n\n**5. 多线程**：\n- **Task Graph**：UE5 任务图系统，并行调度\n- **ParallelFor**：数据并行循环\n- 替代 Unity Job System + Burst\n- Async Task：`FAsyncTask<T>`\n\n**6. 资源加载**：\n- `StreamableManager` 异步加载\n- `LoadPackageAsync` 分帧\n- PrimaryAsset 按需加载\n\n**7. 内存/GC**：\n- 避免频繁 `NewObject`（用对象池）\n- `UObject` 生命周期用 UPROPERTY 管理\n- 量大的纯数据用 `TArray`/struct（不走 GC）\n\n**8. 动画优化**：\n- Animation LOD（`UAnimBlueprint` 的 LOD 阈值）\n- 不可见暂停动画\n- `bEnableRootMotion` 按需关\n\n**9. 缓存**：\n- 计算结果缓存（`UPROPERTY` 成员）\n- 避免重复计算\n\n**测量**：Unreal Insights（CPU Trace），`stat dumphitches`，`stat scenerendering`。\n\n**和 Unity 对比**：Unity 用 Job/Burst 做 C# 并行；UE5 原生 C++ + Task Graph，性能更高，`ParallelFor` 类似 Job 但无需 Burst。\n\n**面试加分点**：能讲 `FName` vs `FString` 的查找开销差异，以及 `TWeakObjectPtr` 避免悬挂引用的用法。",
+    "tags": [
+      "CPU",
+      "TaskGraph",
+      "ParallelFor",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-017",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "对象池（Object Pool）的实现和注意事项？",
+    "answer": "实现：\n```csharp\npublic class ObjectPool<T> where T : Component\n{\n    T prefab;\n    Queue<T> pool = new Queue<T>();\n    int maxSize;\n    \n    public T Get(Vector3 pos)\n    {\n        T item;\n        if (pool.Count > 0)\n        {\n            item = pool.Dequeue();\n            item.transform.position = pos;\n            item.gameObject.SetActive(true);\n        }\n        else\n        {\n            item = Object.Instantiate(prefab, pos, Quaternion.identity);\n        }\n        return item;\n    }\n    \n    public void Return(T item)\n    {\n        if (pool.Count < maxSize)\n        {\n            item.gameObject.SetActive(false);\n            pool.Enqueue(item);\n        }\n        else\n        {\n            Object.Destroy(item.gameObject);\n        }\n    }\n}\n```\n\n**注意事项**：\n\n**1. 预热**：\n- 开局预 Instantiate 一批。\n- 避免运行时首次创建卡顿。\n\n**2. 容量上限**：\n- 防止无限增长。\n- 超出销毁。\n\n**3. 状态重置**：\n- 取出时重置状态（位置、速度、颜色、回调）。\n- 避免上次状态残留。\n\n**4. 事件清理**：\n- 入池时取消事件监听。\n- 避免内存泄漏。\n\n**5. 生命周期**：\n- 对象销毁（场景切换）时清池。\n- 避免悬挂引用。\n\n**6. 线程安全**：\n- 主线程操作 UE5 API。\n- Job 里不能操作 pool。\n\n**7. 泛型 vs 具体**：\n- 泛型灵活但装箱。\n- 具体类型高效。\n\n**8. 统一管理**：\n- PoolManager 管理多类型池。\n- 按 prefab 分池。\n\n**9. UE5 Pool API**：\n- UE5Engine.Pool（官方）。\n- ObjectPool<T>、LinkedPool<T>。\n- 推荐用官方。\n\n**适合**：粒子、子弹、敌人、UI 项、特效。",
+    "tags": [
+      "对象池",
+      "Pool",
+      "实现"
+    ]
+  },
+  {
+    "id": "optimization-018",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 的 Asset Manager 和 Pak Chunk 是什么？比硬编码路径加载好在哪？",
+    "answer": "**UAssetManager**：UE5 的资源管理系统，封装 Pak/Chunk，管理依赖和生命周期。类似 Unity Addressables。\n\n**Pak / Chunk**：\n- Pak：UE5 的打包格式（`.pak`），可整体压缩、加密\n- Chunk：把 Pak 按 PrimaryAsset 分组，支持按需下载\n- 替代 Unity AssetBundle\n\n**特点**：\n- 按 PrimaryAsset 引用（非路径）\n- 自动依赖管理（Asset Registry 依赖图）\n- 异步加载 API（`LoadPrimaryAsset`）\n- 引用计数 + GC 卸载\n- 远程/本地统一\n\n**比硬编码 `LoadObject` 好在哪**：\n\n**1. 内存**：\n- 硬编码加载后难精确卸载\n- AssetManager 按需加载/卸载，引用计数\n\n**2. 包体**：\n- 硬编码资源全进主包\n- Pak/Chunk 可分包、远程下载，主包小\n\n**3. 依赖管理**：\n- 硬编码需手动处理依赖\n- AssetManager 自动（Asset Registry）\n\n**4. 热更新**：\n- 硬编码不支持热更\n- Pak + Chunk 支持远程下载增量更新\n\n**5. 引用稳定**：\n- 硬编码路径字符串易断\n- PrimaryAsset ID 可重命名（引用不变）\n\n**使用**：\n```cpp\n// 加载\nUAssetManager::Get().LoadPrimaryAsset(FPrimaryAssetId(\"Weapon:Weapon_Sword\"));\n// 释放\nUAssetManager::Get().UnloadPrimaryAsset(Handle);\n```\n\n**配置**：\n- `DefaultGame.ini` 注册 PrimaryAssetTypes\n- `AssetManager` 子类化扩展规则\n- Cook 时按 Bundle 规则生成 Chunk\n\n**和 Unity 对比**：Unity Addressables 在 AB 上抽象；UE5 AssetManager + Pak 是原生集成，依赖图由 Asset Registry 自动构建，无需手动维护 manifest。\n\n**面试加分点**：能讲清 Bundle（逻辑分组）和 Chunk（物理 pak 文件）的映射关系，以及 `FPrimaryAssetId` 的 `Type:Name` 格式。",
+    "tags": [
+      "AssetManager",
+      "Pak",
+      "Chunk",
+      "加载"
+    ]
+  },
+  {
+    "id": "optimization-019",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "性能监控和 telemetry 怎么做？",
+    "answer": "目的：\n- 上线后真实性能数据。\n- 发现开发时没遇到的问题。\n- 指导后续优化。\n\n**监控指标**：\n\n**1. 帧率**：\n- 平均 FPS。\n- 1% low FPS（最低 1%）。\n- 卡顿次数（<30FPS）。\n- 按场景/地图统计。\n\n**2. 内存**：\n- 峰值内存。\n- 各类资源占用。\n- OOM 次数。\n\n**3. 加载时间**：\n- 首次启动。\n- 场景切换。\n- AB 加载。\n\n**4. 网络**：\n- 延迟。\n- 丢包率。\n- 断线率。\n\n**5. 崩溃**：\n- 崩溃率。\n- 崩溃堆栈。\n- ANR（应用无响应）。\n\n**6. 设备分布**：\n- 机型、OS、GPU、内存。\n- 按设备分性能数据。\n\n**实现**：\n\n**1. 自研 telemetry**：\n- 上报脚本（定期或事件）。\n- 服务器收集分析。\n- 后台可视化。\n\n**2. 第三方**：\n- GameAnalytics、UE5 Analytics。\n- Bugly、Sentry（崩溃）。\n- Firebase Performance。\n\n**3. 上报策略**：\n- 采样（不全用户上报，省流量）。\n- 关键事件触发。\n- 定期（每 N 分钟）。\n- 网络可用时批量上传。\n\n**4. 隐私**：\n- 用户授权。\n- 不收集敏感信息。\n- 合规（GDPR、CCPA）。\n\n**使用**：\n- 定期 review telemetry。\n- 找性能差的场景/设备。\n- 指导优化优先级。\n- 验证优化效果（上线前后对比）。",
+    "tags": [
+      "监控",
+      "Telemetry",
+      "上线"
+    ]
+  },
+  {
+    "id": "optimization-020",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "构建包体优化？怎么减小包大小？",
+    "answer": "包体优化：\n\n**1. 资源压缩**：\n- 纹理：ASTC（移动）/ BC7（PC），尺寸控制。\n- 音频：Vorbis 压缩，降采样率。\n- mesh：压缩，Read/Write 关。\n- 动画：压缩。\n\n**2. 资源剔除**：\n- 未使用资源检测（Editor 工具）。\n- 删除冗余。\n- 依赖分析。\n\n**3. AB 分包**：\n- 主包小（核心资源）。\n- 首次进入下载扩展包。\n- 按需下载。\n\n**4. 代码裁剪**：\n- IL2CPP（比 Mono 小）。\n- Stripping Level（High）。\n- 移除未用代码。\n\n**5. shader 裁剪**：\n- 变体剥离。\n- 只保留用到的变体。\n\n**6. 资源冗余**：\n- 同资源在多 AB 重复。\n- 依赖分析去重。\n\n**7. 平台特定**：\n- Android：APK Split（按 ABI 分包）。\n- iOS：Bitcode（已弃用）。\n- 资源按平台打包（移动端不用高清）。\n\n**8. 图集优化**：\n- 合理图集大小。\n- 删除未用 sprite。\n\n**9. 字体优化**：\n- 字符集裁剪。\n- 字体子集化。\n\n**10. 资源 Variant**：\n- 多分辨率版本（HD/SD）。\n- 按设备下载。\n\n**测量**：\n- Build Report 看各资源大小。\n- Player Log 看打包详情。\n- 定期 review 大文件。\n\n**目标**：\n- 移动首包 <100MB（应用商店限制）。\n- 总包 <2GB。\n- 按需下载其余。",
+    "tags": [
+      "包体",
+      "构建",
+      "压缩"
+    ]
+  },
+  {
+    "id": "optimization-021",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 的热更新机制如何实现？",
+    "answer": "**热更新**：不通过商店审核，直接更新游戏内容/代码。\n\n**资源热更**：\n- **Pak + Chunk**：UE5 原生方案\n- 版本对比（本地 vs 服务器 manifest）\n- 增量下载（只下载变化的 pak）\n- `FPakPlatformFile::Mount` 挂载新 pak\n- `UAssetManager` 配合管理加载\n- 替代 Unity Addressables 热更\n\n**代码热更**：\n\nUE5 C++ 编译成原生 DLL，无法直接热更。常见方案：\n\n**1. Lua（slua-unreal / unlua）**：\n- 腾讯 unlua 主流方案\n- Lua 解释执行，跨平台\n- 性能：Lua 比 C++ 慢，但逻辑够用\n- 适合：UI、玩法逻辑\n\n**2. puerts（腾讯）**：\n- TypeScript/JS 热更\n- V8 引擎，性能优于 Lua\n- 适合：前端逻辑、Web 团队\n\n**3. Puerts + Pascal / C# via Mono**：\n- 小众方案\n\n**4. Patch DLL（受限）**：\n- 热更 C++ 逻辑通过动态库替换\n- iOS 限制严格，合规风险\n\n**流程**：\n1. 开发环境构建 pak + 脚本\n2. 上传 CDN\n3. 客户端检查版本，下载差异 pak\n4. Mount pak + 加载新脚本\n5. 验证完整性（MD5/签名）\n\n**注意**：\n- 数据结构变化要兼容旧存档\n- 增量 pak 大小控制\n- 失败回滚（旧 pak 继续可用）\n- iOS 不能下载可执行代码（Lua/JS 解释执行合规）\n\n**策略**：\n- 资源热更：常规更新\n- 代码热更：紧急 bug 修复\n- 大版本：走商店审核\n\n**和 Unity 对比**：Unity 用 HybridCLR/ILRuntime 做 C# 热更；UE5 C++ 无法热更，主流用 unlua/puerts 做脚本热更，资源热更用原生 Pak + AssetManager。\n\n**面试加分点**：能讲清 Pak 的加密（`AES Key`）和签名验证，以及 `MountPak` 时 `Priority` 参数控制覆盖顺序。",
+    "tags": [
+      "热更新",
+      "Pak",
+      "unlua",
+      "puerts"
+    ]
+  },
+  {
+    "id": "optimization-022",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "GPU 蒙皮（GPU Skinning）的原理和实现？",
+    "answer": "原理：\n- CPU 蒙皮：主线程算每顶点的骨骼变换。\n- GPU 蒙皮：骨骼矩阵传 shader，顶点 shader 算蒙皮。\n- 省 CPU，GPU 略增。\n\n**UE5 内置**：\n- Quality Settings → Skin Weights（1/2/4 骨骼）。\n- 勾 \"GPU Skinning\"（移动端默认开）。\n- 自动用 GPU 蒙皮。\n\n**手动实现**（更灵活）：\n\n**1. 烘焙骨骼矩阵到纹理**：\n- 每帧把骨骼矩阵（4×4 = 4 float4）烘焙到 RenderTexture。\n- 每骨骼占一行（或一像素）。\n- 顶点 shader 采样纹理获取骨骼矩阵。\n\n**2. 顶点 shader 蒙皮**：\n```hlsl\n// 顶点输入含骨骼索引和权重\nstruct appdata {\n  float4 vertex : POSITION;\n  float4 boneWeights : BLENDWEIGHTS;\n  float4 boneIndices : BLENDINDICES;\n};\n\n// 采样骨骼矩阵\nfloat4x4 GetBoneMatrix(int idx) {\n  // 从纹理采样 4 行\n}\n\n// 蒙皮\nfloat4 skinnedPos = float4(0,0,0,0);\nskinnedPos += boneWeights[0] * mul(GetBoneMatrix(boneIndices[0]), vertex);\nskinnedPos += boneWeights[1] * mul(GetBoneMatrix(boneIndices[1]), vertex);\n// ...\n```\n\n**优势**：\n- 大量角色（NPC、小兵）高效。\n- 配合 GPU Instancing（同 mesh 多角色）。\n- 不走 Animator（用动画纹理烘焙）。\n\n**动画纹理烘焙**：\n- 把动画 clip 烘焙成纹理（每帧每骨骼的矩阵）。\n- shader 采样纹理播放动画。\n- 完全 GPU，无 Animator。\n- 适合：大量相同角色（人群、兵群）。\n\n**限制**：\n- 不支持运行时 blend（固定动画）。\n- 不支持 IK。\n- 复杂动画仍用 Animator。",
+    "tags": [
+      "GPU蒙皮",
+      "Skinning",
+      "优化"
+    ]
+  },
+  {
+    "id": "optimization-023",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 中 Vulkan 和 OpenGL ES 的区别？为什么移动端用 Vulkan？",
+    "answer": "**OpenGL ES**：\n- 老牌移动图形 API\n- GLES 2.0（旧）、3.0（主流）、3.1/3.2（Compute）\n- 状态机模型，驱动开销大\n- 多线程友好性差\n\n**Vulkan**：\n- 现代低开销 API\n- 显式 API（应用控制更多）\n- 驱动开销小\n- 多线程友好（多线程录制 command buffer）\n- 跨平台（桌面/移动）\n\n**优势**：\n\n**1. Draw Call 开销**：\n- GLES 每次 draw call 过驱动\n- Vulkan 预录制 command buffer，批量提交\n- draw call 数可大幅提升\n\n**2. 多线程**：\n- GLES 主线程渲染\n- Vulkan 多线程录制\n- UE5 RHI 可充分利用多核\n\n**3. 内存控制**：\n- Vulkan 显式内存管理\n- 减少驱动隐式分配\n\n**4. 性能**：\n- 同场景 Vulkan 比 GLES 快 20-50%\n- draw call 多时差距更大\n\n**劣势**：\n- 老设备不支持（Android 7.0+ / 部分 GPU）\n- 调试工具不如 GLES 成熟\n\n**UE5 使用**：\n- Project Settings → Target RHI（`Vulkan` / `GLES3.2`）\n- UE5 Mobile 默认 Vulkan 优先，GLES 回退\n- Device Profile 按机型配置\n- 替代 Unity Player Settings 的 Graphics APIs\n\n**现状**：\n- 高端 Android 普遍支持 Vulkan\n- iOS 用 Metal（类似 Vulkan 低开销 API）\n- 低端机仍 GLES\n- UE5 新项目默认 Vulkan 优先\n\n**和 Unity 对比**：Unity URP 也支持 Vulkan；UE5 的 RHI 抽象层对 Vulkan 优化更深，Mobile Forward 渲染器对 Vulkan 利用更充分。\n\n**面试加分点**：能说出 `r.GraphicsAdapter` cvar 选择 API，以及 UE5 的 `RHIThread` 如何与 Vulkan command buffer 录制配合。",
+    "tags": [
+      "Vulkan",
+      "GLES",
+      "RHI",
+      "图形API"
+    ]
+  },
+  {
+    "id": "optimization-024",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 中异步计算（Async Compute）是什么？怎么用？",
+    "answer": "**Async Compute**：\n- GPU 的计算队列和图形队列并行执行\n- Compute Shader 跑 compute queue，图形跑 graphics queue\n- 两者重叠，提高 GPU 利用率\n\n**传统**：\n- 图形队列顺序执行：顶点 → 片元 → 后处理\n- compute 插入图形队列，等待\n\n**Async Compute**：\n- compute queue 独立\n- 图形队列闲时跑 compute\n- 重叠利用 GPU 空闲单元\n\n**适合**：\n- 粒子更新（Niagara compute）+ 图形渲染\n- 后处理 compute + 下一帧渲染\n- 光照计算（Lumen 的 Surface Cache）+ 几何处理\n- GPU 剔除（Hi-Z culling）\n\n**要求**：\n- GPU 支持异步计算（现代 GPU 都支持）\n- API 支持（Vulkan/DX12/Metal）\n- GLES 不支持（部分 3.1+）\n\n**UE5 使用**：\n- RHI 层抽象 Async Compute Queue\n- `FComputeShader` 可指定 async 队列\n- `FRHIComputeCommandList` 提交 compute\n- Lumen / Niagara 部分内部用 async compute\n- 替代 Unity URP/HDRP 的 CommandBuffer 异步\n\n**收益**：\n- GPU 利用率提升 10-30%\n- 帧率提升或更多效果预算\n\n**注意**：\n- 不是所有 compute 都适合异步（依赖前面结果的不行）\n- 过度使用可能反降（队列切换开销）\n- 需 Profiler 验证收益（Unreal Insights GPU view）\n\n**移动端**：\n- Adreno / Mali 高端支持\n- Apple Metal 支持\n- 谨慎使用\n\n**和 Unity 对比**：Unity 通过 CommandBuffer 指定 Async Compute Queue；UE5 在 RHI 层抽象，`ENQUEUE_RENDER_COMMAND` 可指定 Compute，更底层可控。\n\n**面试加分点**：能说出 UE5 的 Async Compute 由 `r.AsyncCompute` 控制，以及 Lumen 的 Surface Feedback 更新就是用 async compute 隐藏在图形 pass 间隙。",
+    "tags": [
+      "AsyncCompute",
+      "ComputeShader",
+      "RHI",
+      "GPU"
+    ]
+  },
+  {
+    "id": "optimization-025",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 中可变着色率（VRS）是什么？怎么用？",
+    "answer": "**VRS（Variable Rate Shading）**：\n- 不同屏幕区域用不同着色率\n- 中心高精度，边缘低\n- 省 GPU 算力\n\n**原理**：\n- 传统：每像素一次片元 shader\n- VRS：可 1×1、2×2、4×4 一次\n- 按 region（屏幕分块）或 per-draw 配置\n\n**用途**：\n\n**1. 视觉中心优化**：\n- 屏幕中心高精度（玩家注意）\n- 边缘低精度\n- VR 尤其有效（foveated rendering）\n\n**2. 运动模糊区域**：\n- 模糊区域细节不重要，低着色率\n\n**3. 深度小变化区域**：\n- 平面区域低着色率\n\n**4. 阴影区域**：\n- 暗处细节不重要\n\n**API 支持**：\n- DX12 Ultimate（Tier 1/2）\n- Vulkan（VK_EXT_fragment_density_map / VK_KHR_fragment_shading_rate）\n- Metal 2+\n- 移动：Adreno 6+、Apple A13+\n\n**UE5 使用**：\n- `r.VRS.Enable` 开启\n- `FVariableRateShading` RHI 接口\n- Forward / Deferred 渲染器均支持\n- Foveated Rendering 插件（VR）\n- 替代 Unity URP/HDRP 的 Foveated Rendering\n\n**收益**：\n- GPU 算力省 20-40%\n- 视觉质量损失小（合理配置）\n\n**适合**：\n- VR/AR（foveated rendering）\n- 高分辨率（4K）移动端\n- 性能预算紧的场景\n\n**注意**：\n- 着色率变化处可能有 seam\n- 不是所有 GPU 支持\n- 调试需专用工具（RenderDoc VRS view）\n\n**和 Unity 对比**：Unity URP 通过 RenderPass API 设置 VRS；UE5 在 RHI 层抽象，`r.VRS.ForcedShadingRate` 可全局强制测试，集成更深。\n\n**面试加分点**：能说出 VRS Tier 1（per-draw）和 Tier 2（per-region / texture-based）的区别，以及 UE5 的 `r.VRS.ImageBased` 支持贴图驱动着色率。",
+    "tags": [
+      "VRS",
+      "着色率",
+      "FoveatedRendering",
+      "RHI"
+    ]
+  },
+  {
+    "id": "optimization-026",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "性能优化的优先级？先做什么？",
+    "answer": "优先级原则：**最大瓶颈优先，高收益低风险优先**。\n\n**第一步：测量**\n- Profiler 抓帧。\n- 找最大耗时模块。\n- 不要凭感觉。\n\n**第二步：分类**\n- CPU bound？GPU bound？内存？\n- 按 80/20 找最大 3 个瓶颈。\n\n**第三步：优先级排序**\n\n**高优先级**（收益大、风险低）：\n1. 合批（draw call 多时）。\n2. 纹理压缩（内存/带宽）。\n3. LOD（场景复杂）。\n4. 剔除（看不见的）。\n5. 后处理精简（移动）。\n6. GC 优化（卡顿）。\n\n**中优先级**（收益中、风险中）：\n1. shader 优化（复杂 shader）。\n2. 物理（Collider 多）。\n3. 动画（角色多）。\n4. 加载优化（卡顿）。\n5. 内存管理（OOM）。\n\n**低优先级**（收益小、风险高）：\n1. 微优化（指令级）。\n2. Job/Burst 重构。\n3. ECS 重构。\n4. 自定义渲染管线。\n\n**原则**：\n- 先做高优先级，收益 80%。\n- 低优先级收益小，风险大，慎做。\n- 平台分级（PC/移动）。\n- 性能预算管理。\n- 持续监控。\n\n**反模式**：\n- 过早优化（功能没好就优化）。\n- 微优化（忽略大瓶颈）。\n- 不测量就优化。\n- 一次改多个变量。",
+    "tags": [
+      "优先级",
+      "优化",
+      "策略"
+    ]
+  },
+  {
+    "id": "optimization-027",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "卡顿（Stutter / Spike）怎么排查和解决？",
+    "answer": "卡顿：偶发的帧率骤降（如 60FPS 突然掉到 20）。\n\n**常见原因**：\n\n**1. GC**：\n- 堆内存分配到阈值触发 GC。\n- GC 暂停所有线程。\n- 解决：减 GC Alloc（见 GC 优化）。\n\n**2. 资源加载**：\n- 同步加载（Resources.Load）。\n- AB 加载。\n- 大资源实例化。\n- 解决：异步加载、预加载、分帧。\n\n**3. Shader 编译**：\n- 首次遇到 shader 变体，运行时编译（卡几百 ms）。\n- 解决：SVC 预热、启动时预编译。\n\n**4. 物理**：\n- 大量碰撞检测。\n- 复杂 Mesh Collider。\n- 解决：简化 Collider、降频率。\n\n**5. 动画**：\n- 动画 clip 首次加载。\n- blend 复杂。\n- 解决：预加载、简化。\n\n**6. 蒙皮**：\n- 大量角色同时蒙皮。\n- 解决：GPU 蒙皮、LOD。\n\n**7. GC.Alloc 大对象**：\n- 大数组、大字符串分配。\n- 直接进大对象堆，触发 GC。\n- 解决：预分配、对象池。\n\n**8. 文件 IO**：\n- 存档读写。\n- 日志写入。\n- 解决：异步、缓存。\n\n**9. 网络**：\n- 同步网络请求。\n- 解决：异步。\n\n**排查**：\n- Profiler 抓卡顿帧。\n- 看哪一帧耗时突增。\n- Hierarchy 视图找耗时函数。\n- GC Alloc 列看分配。\n- 多次抓帧确认规律。\n\n**解决流程**：\n1. 复现卡顿。\n2. Profiler 抓帧。\n3. 定位原因。\n4. 针对优化。\n5. 验证。\n\n**预防**：\n- 性能预算。\n- 自动化性能测试。\n- Telemetry 监控。",
+    "tags": [
+      "卡顿",
+      "Stutter",
+      "排查"
+    ]
+  },
+  {
+    "id": "optimization-028",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "UE5 怎么用 Profiler Marker 做自定义性能分析？",
+    "answer": "**UE5 性能标记**：\n\nUE5 不用 Unity 的 `ProfilerMarker`，而是用以下 API：\n\n**1. TRACE_CPUPROFILER_EVENT_SCOPE**（推荐）：\n```cpp\nvoid MyFunction()\n{\n    TRACE_CPUPROFILER_EVENT_SCOPE(MyFunction);\n    // 代码\n}\n```\n- 宏自动 Begin/End\n- 显示在 Unreal Insights\n\n**2. FScopedDurationTimer**：\n```cpp\n{\n    FScopedDurationTimer Timer(CpuTime);\n    // 代码\n} // 析构时记录耗时\n```\n\n**3. SCOPE_CYCLE_COUNTER**：\n```cpp\nDECLARE_CYCLE_STAT(TEXT(\"MyFunction\"), STAT_MyFunc, STATGROUP_MyGame);\nvoid MyFunction()\n{\n    SCOPE_CYCLE_COUNTER(STAT_MyFunc);\n    // 代码\n}\n```\n- 显示在 `stat` 命令\n\n**4. FPlatformTime::Cycles**：\n```cpp\nuint32 Start = FPlatformTime::Cycles();\n// 代码\nuint32 End = FPlatformTime::Cycles();\nfloat Ms = FPlatformTime::ToMilliseconds(End - Start);\n```\n\n**用途**：\n- 标记自定义代码段\n- Unreal Insights 里显示耗时\n- 比默认函数级更细\n\n**分析场景**：\n\n**1. 函数耗时**：标记怀疑的函数\n\n**2. 代码段耗时**：标记循环、计算\n\n**3. 模块耗时**：标记整个模块（AI、Inventory）\n\n**4. 对比优化前后**：验证效果\n\n**Unreal Insights**：\n- UE5 主力 Profiler（替代旧 CPU Profiler）\n- `trace` 命令启动 trace\n- Timing Insights 看时序\n- Asset Insights 看资源\n- Networking Insights 看网络\n\n**stat 命令**：\n- `stat fps`：帧率\n- `stat unit`：各线程耗时\n- `stat scenerendering`：渲染统计\n- `stat dumpTicks`：Tick 耗时\n\n**注意**：\n- Marker 开销极小，Shipping 也可保留（`-trace`）\n- 命名清晰，便于查找\n- 不要过度标记\n\n**和 Unity 对比**：Unity 用 `ProfilerMarker` 显示在 Profiler；UE5 用 `TRACE_CPUPROFILER_EVENT_SCOPE` 显示在 Unreal Insights，功能更强（含 Timing/Asset/Network 多视图）。\n\n**面试加分点**：能讲清 `stat` 命令（轻量）和 Unreal Insights（深度 trace）的适用场景，以及 `-trace=cpu` 启动参数的使用。",
+    "tags": [
+      "ProfilerMarker",
+      "UnrealInsights",
+      "TRACE",
+      "分析"
+    ]
+  },
+  {
+    "id": "optimization-029",
+    "category": "optimization",
+    "difficulty": "中级",
+    "question": "性能优化的常见误区？",
+    "answer": "**1. 过早优化**：\n- 功能没实现就优化。\n- 优化方向可能错（需求变）。\n- 先功能后性能。\n\n**2. 不测量就优化**：\n- 凭感觉优化。\n- 优化了不是瓶颈的地方。\n- 浪费时间。\n- 必须先 Profiler 测。\n\n**3. 微优化忽略大瓶颈**：\n- 花时间优化 1ms 的函数。\n- 忽略 100ms 的物理。\n- 抓主要矛盾。\n\n**4. 编辑器性能 = 真机性能**：\n- 编辑器有额外开销。\n- 真机 GPU 不同。\n- 必须真机测。\n\n**5. 只测高端机**：\n- 用户多用中低端。\n- 高端机流畅不代表都流畅。\n- 覆盖多机型。\n\n**6. 只测短时间**：\n- 长时间运行降频、内存泄漏。\n- 短测看不出。\n- 长测（30 分钟+）。\n\n**7. 优化 PC 以为移动也好**：\n- PC GPU 算力强，移动带宽紧。\n- 优化策略不同。\n- 分别优化。\n\n**8. 一次改多个变量**：\n- 不知道哪个优化有效。\n- 一次改一个。\n- 验证后再改下一个。\n\n**9. 不记录 before/after**：\n- 优化效果不可量化。\n- 团队无法学习。\n- 必须记录对比。\n\n**10. 优化后不复测**：\n- 以为优化了就好。\n- 可能引入新问题。\n- 必须复测。\n\n**11. 忽略内存**：\n- 只看帧率。\n- OOM 也是性能问题。\n- 内存监控。\n\n**12. 滥用对象池**：\n- 不该池化的也池化。\n- 池过大占内存。\n- 按需池化。\n\n**13. 滥用 LOD**：\n- LOD 切换频繁（pop-in）。\n- LOD 配置不合理。\n- 测试验证。\n\n**14. 关闭 VSync 测**：\n- VSync 影响帧率。\n- 关 VSync 看真实 GPU 能力。\n- 但要测 VSync 开的性能（实际玩家）。",
+    "tags": [
+      "误区",
+      "优化",
+      "经验"
+    ]
+  },
+  {
+    "id": "optimization-030",
+    "category": "optimization",
+    "difficulty": "高级",
+    "question": "UE5 性能优化的完整工作流？从项目开始到上线？",
+    "answer": "**项目阶段**：\n\n**1. 预生产**：\n- 制定性能预算（帧率、内存、draw call）\n- 选渲染管线：**Forward（移动）/ Forward+ / Deferred + Lumen + Nanite（PC/主机）**\n- 技术方案：ISM/HISM 策略、LOD、资源规范\n- 原型验证性能\n\n**2. 生产**：\n- 按规范制作资源\n- 自动化检查（Editor Utility / Python 脚本）\n- 定期性能测试（每周/版本）\n- 性能 Review（TA 把关）\n- 持续优化热点\n\n**3. 测试**：\n- 多机型测试（低/中/高）\n- 长时间运行（泄漏、降频）\n- 极端场景（满屏特效、大量角色）\n- 网络弱测\n- 自动化性能测试（UAT + Automation System）\n\n**4. 上线前**：\n- 全面性能 review\n- 包体优化（Pak 分包、资源压缩）\n- 内存优化（Texture Streaming、Mip Streaming）\n- 帧率达标（目标机型）\n- OOM 率 <1%\n\n**5. 上线后**：\n- Telemetry 监控（Analytics）\n- 收集真实性能数据\n- 找问题机型/场景\n- Pak 热更修复\n- 版本迭代优化\n\n**持续工作**：\n- 性能预算文档维护\n- 规范更新\n- 工具链完善\n- 团队培训\n- 性能 case 分享\n\n**关键指标**：\n- 帧率：60FPS（移动目标）\n- 卡顿率：<5% 帧低于 30FPS\n- 内存：<1GB（移动）\n- OOM 率：<0.5%\n- 启动时间：<10s\n- 包体：<500MB 首包\n\n**团队角色**：\n- TA：渲染优化、规范、Shader\n- 程序：逻辑、多线程、UAssetManager\n- 美术：资源规格\n- QA：性能测试、报告\n- PM：预算、优先级\n\n**和 Unity 对比**：Unity 用 URP/HDRP + IL2CPP + AB；UE5 用 Forward/Deferred + Lumen/Nanite + 原生 C++ + Pak/Chunk，工具链用 Unreal Insights + UAT。\n\n**面试加分点**：能讲清 Device Profile + CVAR 组合做分级配置，以及 Cook 阶段的 Shader Stripping 对包体的影响。",
+    "tags": [
+      "工作流",
+      "优化",
+      "Lumen",
+      "Nanite",
+      "Pak"
+    ]
+  }
+]

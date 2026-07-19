@@ -1,0 +1,13 @@
+# WorkBuddy workspace logs (private)
+.workbuddy/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Local server launcher (desktop only)
+*.bat

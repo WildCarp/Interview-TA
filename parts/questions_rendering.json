@@ -1,0 +1,454 @@
+[
+  {
+    "id": "rendering-001",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "前向渲染（Forward）和延迟渲染（Deferred）的区别？UE5 里各自适合什么？",
+    "answer": "**Forward（前向）**：\n- 每物体逐个绘制，每像素在 Base Pass 内直接计算所有光照。\n- 优点：简单、透明物体支持好、MSAA 友好、移动端兼容好。\n- 缺点：多光源时片元内循环所有光，复杂度 O(物体×光源)。\n- UE5 移动端默认 Forward。\n\n**Deferred（延迟）**：\n- Base Pass 先把所有不透明物体写入 G-Buffer（Albedo/Normal/Roughness/Metallic 等）。\n- Lighting Pass 读 G-Buffer 在屏幕空间统一计算光照。\n- 优点：光照复杂度 O(像素×光源)，与物体数无关；多光源高效。\n- 缺点：G-Buffer 占带宽（MRT 多张纹理）；透明仍走 Forward；MSAA 难。\n- UE5 PC/主机默认 Deferred + Lumen + Nanite。\n\n**Forward+（Cluster Forward）**：\n- 前向 + 屏幕分簇光照剔除（Culling），每像素只算影响它的光源。\n- 兼具前向（MSAA、透明）和延迟（多光源）优点。\n- UE5 5.1+ 支持，移动端旗舰可用。\n\n**和 Unity 的对比**：Unity URP 对应 UE5 Forward/Forward+；Unity HDRP 对应 UE5 Deferred+Lumen。UE5 的 Lumen GI、Nanite 几何只在 Deferred 下完整可用。\n\n**面试加分点**：UE5 用 RDG（Render Dependency Graph）自动管理 Pass 依赖；Mobile HDR 默认 Forward，ForwardShading 项目设置切换；TSR 超分配合 Deferred 效果最佳。",
+    "tags": [
+      "前向",
+      "延迟",
+      "Forward",
+      "Deferred",
+      "Forward+",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-002",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "Forward+（分簇前向渲染）是什么？UE5 里解决了什么问题？",
+    "answer": "Forward+ = Forward + Cluster 光照剔除。\n\n**解决的问题**：\n- 传统 Forward：多光源每片元循环所有光，贵。\n- Deferred：多光源高效但不支持透明、MSAA 难、移动端带宽爆。\n\n**UE5 Forward+ 方案**：\n1. **光源剔除 Pass**（Compute Shader）：把屏幕分成 3D 簇（如 16×16 像素 + 深度切片），每簇记录影响它的光源索引。\n2. **前向渲染 Pass**：每像素查询所属簇的光源列表，只循环这些光源（通常 <10）。\n\n**优势**：\n- 多光源高效（每像素只算少量光）。\n- 支持透明物体（仍前向）。\n- 支持 MSAA。\n- 不需要 G-Buffer，省带宽，移动端可跑。\n\n**UE5 实现**：5.1+ 支持 Forward+，Project Settings > Rendering > ForwardShading 仍为 Forward，引擎自动启用簇剔除。高端移动、PC、VR 可用。\n\n**限制**：\n- 需 Compute Shader（部分老移动 GPU 不支持）。\n- 光源剔除 Pass 有固定开销。\n- 簇数和光源数要平衡。\n\n**和 Unity 的对比**：Unity URP 14+ 有 Forward+；UE5 Forward+ 和 Lumen 不兼容（Lumen 需 Deferred），移动端 Forward+ 是主流高端方案。\n\n**面试加分点**：Forward+ 的簇剔除可用 r.Forward.LightCulling 调试；VR 场景 Forward+ + MSAA 比 Deferred 更适合（低延迟、抗锯齿好）。",
+    "tags": [
+      "Forward+",
+      "Cluster",
+      "多光源",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-003",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "延迟渲染的 G-Buffer 包含什么？MRT 是什么？UE5 的 G-Buffer 结构？",
+    "answer": "G-Buffer（几何缓冲）：多个 Render Target 存储每像素的几何/材质信息。\n\n**UE5 Deferred 的 G-Buffer 结构**：\n- **GBufferA (RGBA8)**：World Normal (RGB) + PerObjectGBufferData(A)\n- **GBufferB (RGBA8)**：Metallic(R) + Specular(G) + Roughness(B) + ShadingModelID(A)\n- **GBufferC (RGBA8)**：Base Color (RGB) + GBufferAO(A)\n- **GBufferD (RGBA8)**：Custom Data（按 ShadingModel 用，如 SubsurfaceColor）\n- **GBufferE (RGBA8)**：PrecomputedShadowFactors + 其他\n- **GBufferVelocity (RGBA16F)**：运动向量（TAA/MotionBlur）\n- 深度缓冲（SceneDepthZ）\n- 可选：GBufferStencil（材质 ID 等）\n\n**MRT（Multiple Render Targets）**：\n- 一次 draw call 同时写入多个 Render Target。\n- 片元 shader 输出多个 SV_Target。\n- G-Buffer 渲染用 MRT，要求硬件支持。\n\n**光照 Pass**：读 G-Buffer（纹理采样）计算光照，每像素一次，与物体数无关。\n\n**问题**：\n- 带宽：G-Buffer 多张全屏纹理，移动端贵。\n- 材质多样性：G-Buffer 固定格式，特殊 ShadingModel（Subsurface/Hair）用 GBufferD 扩展。\n- 透明：透明物体不写 G-Buffer，走单独 Forward Pass。\n\n**和 Unity 的对比**：Unity HDRP G-Buffer 类似但通道分配不同；UE5 用 ShadingModelID 区分材质类型，GBufferD 按需存自定义数据，扩展性更强。\n\n**面试加分点**：r.GBufferFormat 可切换 G-Buffer 精度（0=高精度 RGBA8，1=低精度省带宽）；Lumen Surface Cache 复用 G-Buffer 做 GI 缓存；ShowFlag.VisualizeGBuffer 查看各通道。",
+    "tags": [
+      "GBuffer",
+      "MRT",
+      "延迟渲染",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-004",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "IMR、TBR、TBDR 三种 GPU 架构的区别？为什么移动端用 TBR？",
+    "answer": "**IMR（Immediate Mode Rendering，立即模式）**：\n- PC GPU（NVIDIA/AMD）。\n- 三角形逐个直接渲染到帧缓冲。\n- 优点：吞吐高、带宽足。\n- 缺点：需大带宽访问帧缓冲（每像素多次读写）。\n\n**TBR（Tile-Based Rendering，分块渲染）**：\n- 移动 GPU（Mali、Adreno）。\n- 把屏幕分成小块（Tile，如 16×16），每块在片上缓存（Tile Memory）里完整渲染。\n- 渲染完一块再写回显存。\n- 优点：帧缓冲访问在片上，省带宽、省功耗。\n- 缺点：几何处理两遍（先分到 tile，再渲染）；render target 切换代价高（要清空 tile）。\n\n**TBDR（Tile-Based Deferred Rendering）**：\n- Apple GPU。\n- 在 TBR 基础上，片元着色延迟到所有几何处理完（Hidden Surface Removal）。\n- 类似硬件 Early-Z，最终可见像素才着色。\n- 优点：进一步省片元着色（被遮挡的不算）。\n- 缺点：依赖正确排序（不透明才能优化）。\n\n**为什么移动用 TBR**：\n- 移动显存带宽有限（功耗和发热）。\n- TBR 把帧缓冲访问挪到片上 SRAM，省带宽。\n- 功耗低（移动端关键）。\n\n**影响**：\n- render target 切换贵（SceneTexture 抓屏、多 pass 后处理）。\n- 透明 overdraw 贵（tile 内不能剔除）。\n- 全屏后处理要谨慎。",
+    "tags": [
+      "IMR",
+      "TBR",
+      "TBDR",
+      "GPU架构"
+    ]
+  },
+  {
+    "id": "rendering-005",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Early-Z 是什么？Z-Prepass 是什么？什么情况下 Early-Z 失效？",
+    "answer": "**Early-Z（Early Depth Test）**：\n- 在片元着色之前做深度测试。\n- 被遮挡的片元直接丢弃，不执行 shader。\n- 节省片元着色开销。\n\n**条件**：\n- ZWrite On。\n- ZTest 是简单比较（LEqual/Less 等）。\n- 不写深度（SV_DEPTH）。\n- 不用 AlphaBlend（透明无法 Early-Z）。\n- 不用 discard/clip（AlphaTest 部分场景仍可）。\n\n**Early-Z 失效**：\n- AlphaBlend（透明）：需要看到后面，不能提前剔除。\n- 手动写深度（SV_DEPTH）。\n- 复杂的 ZTest（Always）。\n- 某些 shader 用了 ddx/ddy 或纹理依赖深度。\n\n**Z-Prepass**：\n- 先用简化 shader 只渲染深度（不画颜色）。\n- 把深度缓冲填好。\n- 再用完整 shader 渲染，此时 Early-Z 能剔除大部分被遮挡片元。\n- 适合：复杂 shader + 高 overdraw 场景（如大量植被）。\n- 代价：多一次 draw call（只写深度，shader 极简）。\n- 收益：shader 复杂的片元被剔除，省 ALU。\n\n**适用**：\n- 植被、复杂 PBR 场景。\n- 不适合：简单 shader（prepass 开销大于收益）。",
+    "tags": [
+      "EarlyZ",
+      "ZPrepass",
+      "深度"
+    ]
+  },
+  {
+    "id": "rendering-006",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 一帧的渲染流程是怎样的？RDG 如何组织 Pass？",
+    "answer": "UE5 一帧大致流程（Deferred 为例）：\n\n1. **可见性剔除（Culling）**：\n   - 视锥剔除、遮挡剔除（Hierarchical Z-Buffer）。\n   - Precomputed Visibility（烘焙）。\n\n2. **Shadow Depth Pass**：\n   - CSM 级联阴影深度。\n   - 定向光、点光阴影。\n\n3. **Base Pass（G-Buffer）**：\n   - 不透明物体写 G-Buffer（Albedo/Normal/Roughness/Metallic）。\n   - Nanite 在此阶段做 cluster 可见性剔除。\n\n4. **Velocity Pass**：\n   - 写运动向量（TAA/MotionBlur 用）。\n\n5. **Lighting（Deferred）**：\n   - 读 G-Buffer 计算直接光 + 间接光。\n   - Lumen GI（Surface Cache + 屏幕空间追踪）。\n\n6. **SSR / SSAO / SSGI**：\n   - 屏幕空间反射、AO、GI。\n\n7. **Translucency**：\n   - 透明物体 Forward 渲染，按距离排序。\n\n8. **Post Processing**：\n   - Bloom、TAA、TSR、Color Grading、Tone Mapping。\n   - Post Process Material（自定义）。\n\n9. **UI (UMG)**：\n   - Slate 渲染。\n\n**RDG（Render Dependency Graph）**：\n- 现代 UE5 渲染核心，用图结构管理 Pass 依赖。\n- 自动管理 RT 生命周期、内存复用、屏障插入。\n- C++ 层用 FRDGBuilder 注册 Pass。\n\n**和 Unity SRP 的对比**：Unity URP 用 ScriptableRenderPass 手动组织；UE5 RDG 自动化程度更高，TA 通过 Post Process Material / 插件扩展，少直接改 RDG。\n\n**面试加分点**：stat scenerendering 看每阶段耗时；r.VisualizeRDG 可视化依赖图；RDG 让 RT 在不再使用时立即释放，省显存。",
+    "tags": [
+      "渲染流程",
+      "RDG",
+      "UE5",
+      "BasePass"
+    ]
+  },
+  {
+    "id": "rendering-007",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的 Post Process Material 和 RDG Pass 是什么？如何扩展渲染管线？",
+    "answer": "**Post Process Material（PPM）**：\n- UE5 材质系统的特殊材质域（Material Domain = Post Process）。\n- 在后处理阶段插入全屏 shader。\n- 可读 SceneTexture: PostProcessInput0（当前画面）、SceneDepth、SceneColor 等。\n- 在 Post Process Volume 里配置权重和优先级。\n- 适合：描边、扫描线、扭曲、色调调整、自定义后处理。\n\n**RDG Pass（Render Dependency Graph Pass）**：\n- C++ 层的渲染扩展机制。\n- 用 FRDGBuilder::AddPass 注册自定义 Pass。\n- 可读写任意 RT、Compute Buffer。\n- 适合：需要深度集成管线的效果（自定义 G-Buffer、混合渲染）。\n\n**关系**：\n- PPM 是材质层扩展，无需 C++，TA 友好。\n- RDG Pass 是代码层扩展，灵活但要改引擎或插件。\n- PPM 底层也是 RDG Pass。\n\n**PPM 示例（描边）**：\n1. 材质 Domain 设 Post Process。\n2. 采样 CustomStencil / SceneDepth 区分物体。\n3. Sobel 边缘检测 + 描边色。\n4. 挂到 Post Process Volume。\n\n**内置扩展点**：\n- Renderer Module 插件：改 BasePass/Lighting。\n- Scene View Extension：注入自定义渲染逻辑。\n\n**和 Unity 的对比**：Unity URP 用 ScriptableRendererFeature + ScriptableRenderPass 扩展；UE5 PPM 对应 Renderer Feature 的简单后处理，RDG Pass 对应 RenderPass 的深度扩展。UE5 PPM 无需写 C#，纯材质图即可。\n\n**面试加分点**：PPM 的 Blending Location（Before Tonemapping/After Tonemapping/Replacing Tonemapping）决定插入时机；SceneTexture: SceneDepth 在 Deferred 可直接读，Forward 需单独 Depth Pass。",
+    "tags": [
+      "PostProcessMaterial",
+      "RDG",
+      "渲染扩展",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-008",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Shadow Map 的原理？CSM（级联阴影）解决什么问题？",
+    "answer": "**Shadow Map 原理**：\n1. 从光源视角渲染场景深度到阴影贴图（Shadow Map）。\n2. 主相机渲染时，每像素转换到光源空间，比较深度。\n3. 若像素深度 > Shadow Map 对应深度，被遮挡，在阴影里。\n\n**问题**：\n- Shadow Map 分辨率有限，大场景阴影锯齿（perspective aliasing）。\n- 近处物体阴影该清晰，远处可模糊。\n\n**CSM（Cascaded Shadow Maps）**：\n- 把视锥分成几段（级联，如 4 级）。\n- 每段用独立的 Shadow Map，近段分辨率高、远段低。\n- 渲染时按像素深度选对应级联。\n\n**优点**：\n- 近处阴影清晰（高分辨率 Shadow Map）。\n- 远处阴影够用（低分辨率省内存）。\n- 整体阴影质量提升。\n\n**参数**：\n- 级联数（通常 4）。\n- 级联分割（按距离或对数）。\n- Shadow Map 分辨率（每级 1024 或 2048）。\n\n**问题**：\n- 级联切换处可能有接缝（需 blend）。\n- 多级联 = 多次渲染场景深度（draw call 增加）。\n\n移动端：2 级联或单级联 + 距离淡化。",
+    "tags": [
+      "ShadowMap",
+      "CSM",
+      "阴影"
+    ]
+  },
+  {
+    "id": "rendering-009",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "软阴影算法：PCF、PCSS、VSM 的原理和区别？",
+    "answer": "**PCF（Percentage-Closer Filtering）**：\n- 在阴影比较时采样周围 N×N 个点，平均结果。\n- 产生软边阴影。\n- 简单、稳定。\n- 缺点：采样数越多越贵；固定模糊宽度，无物理正确性。\n- UE5 默认 PCF（3×3、5×5）。\n\n**PCSS（Percentage-Closer Soft Shadows）**：\n- 基于 PCF，但模糊宽度随遮挡距离变化。\n- 物理正确：遮挡物越远，阴影越散（半影越大）。\n- 流程：\n  1. 搜索遮挡物平均深度。\n  2. 计算半影宽度（基于距离）。\n  3. 按宽度 PCF 采样。\n- 优点：真实软阴影。\n- 缺点：贵（多次搜索 + PCF）。\n\n**VSM（Variance Shadow Maps）**：\n- 存深度和深度平方，用切比雪夫不等式估算遮挡概率。\n- 可用硬件双线性过滤 + mipmap，模糊廉价。\n- 优点：快速软阴影。\n- 缺点：light leaking（漏光，多遮挡物时出错）。\n\n**其他**：\n- MSM（Moment Shadow Maps）：VSM 改进，减漏光。\n- SDF Shadows：基于距离场，实时软阴影。\n- RT Shadows：光线追踪，最准但贵。\n\n移动端：PCF 3×3 够。PC：PCSS 或 RT。",
+    "tags": [
+      "PCF",
+      "PCSS",
+      "VSM",
+      "软阴影"
+    ]
+  },
+  {
+    "id": "rendering-010",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "阴影的性能优化有哪些手段？",
+    "answer": "**1. Shadow Map 分辨率**：\n- 移动 1024，PC 2048-4096。\n- 远距离降级。\n\n**2. 级联数**：\n- 移动 1-2 级联。\n- PC 4 级联。\n\n**3. 阴影距离**：\n- 限制阴影渲染距离（远处不投影）。\n- 远距离用假阴影（blob shadow、圆斑）。\n\n**4. 只必要物体投影**：\n- 小物体、装饰物不投影。\n- 只主角 + 重要物体投影。\n\n**5. Shadow Caster 优化**：\n- Shadow Caster pass 用简化 shader（只深度）。\n- Shadow LOD（远距离用低模投影）。\n\n**6. 阴影更新频率**：\n- 静态物体阴影烘焙（lightmap）。\n- 动态物体实时阴影。\n- 部分阴影隔帧更新。\n\n**7. 软阴影采样数**：\n- 移动 PCF 4 采样。\n- PC 16 采样。\n\n**8. 阴影剔除**：\n- 视锥外物体不投影。\n- 屏幕外不计算阴影。\n\n**9. Contact Shadows**：\n- 屏幕空间近距离阴影（SSAO 类似）。\n- 补偿阴影贴图精度不足。\n\n**10. RT Shadows（PC）**：\n- 光线追踪阴影，精确但贵。\n- 只关键物体用。",
+    "tags": [
+      "阴影",
+      "优化",
+      "ShadowMap"
+    ]
+  },
+  {
+    "id": "rendering-011",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "MSAA、FXAA、TAA 三种抗锯齿的原理和区别？UE5 默认用什么？",
+    "answer": "**MSAA（Multi-Sample Anti-Aliasing）**：\n- 每像素多个采样点（2x/4x/8x），几何边缘多次采样平均。\n- 优点：质量高、几何边缘平滑、物理正确。\n- 缺点：显存和带宽翻倍；不抗 shader 内部锯齿（透明、纹理）；延迟渲染难用（MRT+MSAA 显存爆）。\n- UE5：Forward 模式支持 MSAA，Deferred 不支持。\n\n**FXAA（Fast Approximate AA）**：\n- 后处理，检测边缘像素，模糊。\n- 优点：廉价（单 pass）、跨渲染路径、抗所有锯齿。\n- 缺点：模糊（细节损失）、质量低。\n- UE5：可用，但非默认。\n\n**TAA（Temporal AA）**：\n- 利用上一帧信息（历史缓冲），结合当前帧抖动采样。\n- 优点：质量高（接近 MSAA）、廉价、抗 shader 锯齿。\n- 缺点：鬼影（快速运动拖影）、需运动向量、可能闪烁。\n- UE5：**默认 AA**，配合 Velocity Pass。\n\n**TSR（Temporal Super Resolution）**：\n- UE5 自研时序超分，基于 TAA 思路 + 上采样。\n- 低分辨率渲染 → 高分辨率输出，省 GPU。\n- UE5 5.0+ 默认替代 TAA。\n\n**选择**：\n- 移动 Forward：MSAA 2x 或 FXAA。\n- PC Deferred：TSR（默认）。\n- VR：MSAA（低延迟、无鬼影）。\n\n**和 Unity 的对比**：Unity URP/HDRP 默认 TAA；UE5 默认 TSR（更激进的上采样）。TSR 在低分辨率渲染时质量优于纯 TAA。\n\n**面试加分点**：TAA 鬼影缓解用历史色 clamping + 运动矢量；r.AntiAliasingMethod 切换 AA（0=FXAA,1=TAA,2=MSAA,3=TSR）；TSR 可在 Project Settings 关闭退回 TAA。",
+    "tags": [
+      "MSAA",
+      "FXAA",
+      "TAA",
+      "TSR",
+      "抗锯齿",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-012",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "DLSS、FSR、XeSS 等 AI 超分算法的原理？",
+    "answer": "AI 超分辨率：低分辨率渲染 → AI 放大到高分辨率，省 GPU 算力。\n\n**DLSS（NVIDIA）**：\n- 用 Tensor Core 跑神经网络。\n- 输入：低分辨率颜色 + 深度 + 运动矢量 + 抖动偏移。\n- 输出：高分辨率颜色。\n- 网络学习如何从低分辨率 + 时序信息重建细节。\n- 优点：质量最高、专门 RTX 硬件加速。\n- 缺点：只 NVIDIA RTX。\n\n**FSR（AMD，FidelityFX Super Resolution）**：\n- FSR 1：纯算法（Lanczos 上采样 + 锐化），非 AI，跨平台。\n- FSR 2：时序重建（类似 TAA 思路），非 AI，跨平台。\n- FSR 3：加帧生成（插帧）。\n- 优点：跨平台（AMD/NVIDIA/移动）、开源。\n- 缺点：质量略逊 DLSS。\n\n**XeSS（Intel）**：\n- AI 超分，类似 DLSS。\n- 跨平台（Intel/AMD/NVIDIA），但 Intel 硬件加速最好。\n\n**TSR（Unreal）**：\n- Epic 自研时序超分，非 AI。\n- UE5 默认。\n\n**原理共性**：\n- 低分辨率渲染（省 ALU）。\n- 时序信息累积（多帧抖动采样）。\n- 上采样重建细节。\n- AI 版本用神经网络学习重建，质量更高。\n\n**使用**：\n- 4K 输出，1080p 渲染 → 性能提升 2-3 倍。\n- 适合 RT 开启后性能补偿。",
+    "tags": [
+      "DLSS",
+      "FSR",
+      "XeSS",
+      "超分"
+    ]
+  },
+  {
+    "id": "rendering-013",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Linear 和 Gamma 颜色空间有什么区别？为什么用 Linear？",
+    "answer": "**Gamma 空间**：\n- 颜色值经过 gamma 编码（约 pow 0.45）。\n- 显示器自动 gamma 解码（pow 2.2）。\n- 老管线默认。\n- 问题：光照计算在非线性空间，结果错误（暗部过暗、高光偏）。\n\n**Linear 空间**：\n- 所有光照计算在线性空间。\n- 输入颜色从 sRGB 转 Linear（pow 2.2）。\n- 光照计算正确（物理）。\n- 输出时转回 sRGB（pow 0.45）。\n- 现代管线默认。\n\n**为什么用 Linear**：\n1. **物理正确**：光照在线性空间叠加才正确。Gamma 空间下，两个光源叠加结果比真实暗。\n2. **暗部细节**：Linear 空间暗部有更多层次，Gamma 暗部压缩。\n3. **PBR 必须**：PBR 假设线性空间，Gamma 下 PBR 结果错。\n4. **混合正确**：Alpha 混合在线性空间才物理正确。\n\n**UE5 设置**：\n- Project Settings → Player → Color Space = Linear（推荐）。\n- 贴图的 sRGB 选项决定是否转换。\n- UI 文字等 sRGB 资源正确显示。\n\n**注意**：\n- 数据贴图（Normal、Metallic）必须 Linear（不转换）。\n- 颜色贴图（Albedo）必须 sRGB。\n- 转换错误导致颜色偏。",
+    "tags": [
+      "Linear",
+      "Gamma",
+      "颜色空间"
+    ]
+  },
+  {
+    "id": "rendering-014",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "HDR 是什么？为什么渲染要用 HDR？",
+    "answer": "HDR（High Dynamic Range）：颜色值超过 [0,1]，可表达 >1.0 的亮度。\n\n**LDR（Low Dynamic Range）**：\n- 颜色值 [0,1]（8 位每通道）。\n- 最亮就是白色（1,1,1）。\n- 不能表达真实亮度差异（太阳 vs 灯泡）。\n\n**HDR 渲染**：\n- Render Texture 用浮点格式（RGBA16F 或 RGBA32F）。\n- 颜色可 >1.0（如太阳 = 100.0）。\n- 光照计算保留亮度信息。\n- Tone Mapping 映射回 LDR 显示。\n\n**为什么用 HDR**：\n1. **Bloom 正确**：Bloom 阈值 >1.0 才发光（HDR 下太阳发光，普通白色不发光）。LDR 下阈值难定。\n2. **光照叠加正确**：多个光源叠加可超过 1.0，HDR 保留信息。\n3. **Tone Mapping**：HDR → LDR 映射，控制曝光，电影感。\n4. **亮度信息**：SSAO、SSR 等需要亮度信息。\n5. **PBR**：PBR 假设 HDR（specular 可 >1）。\n\n**代价**：\n- 显存：HDR 纹理 2-4 倍 LDR。\n- 带宽：读写更多。\n- 移动端：RGBA16F 可接受，RGBA32F 太贵。\n\n**移动端**：用 RGBA16F（HalfFloat），开 HDR 但控制后处理层数。",
+    "tags": [
+      "HDR",
+      "LDR",
+      "ToneMapping"
+    ]
+  },
+  {
+    "id": "rendering-015",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "VSync 是什么？为什么要开？三缓冲是什么？",
+    "answer": "**VSync（Vertical Synchronization）**：\n- 帧缓冲交换和显示器刷新同步。\n- 显示器刷新周期内只交换一次。\n- 防止画面撕裂（tearing）。\n\n**撕裂原因**：\n- 没有 VSync：GPU 渲染完就交换，显示器可能正在显示一半。\n- 上半帧和下半帧来自不同渲染帧，画面撕裂。\n\n**VSync 问题**：\n- 如果一帧渲染 >1 刷新周期（如 60Hz 显示器渲染需 17ms），要等下一个刷新（33ms），帧率降到 30FPS。\n- 输入延迟增加。\n\n**双缓冲**：\n- 前缓冲（显示）+ 后缓冲（渲染）。\n- 渲染完后 VSync 时交换。\n- 渲染比刷新快时，后缓冲空等（仍 60FPS）。\n- 渲染比刷新慢时，丢帧（30FPS）。\n\n**三缓冲**：\n- 前缓冲 + 后缓冲 + 第三缓冲。\n- 渲染不用等前缓冲释放，可继续渲染下一帧。\n- 优点：帧率更平滑（不直接掉到 30）。\n- 缺点：多一帧延迟（输入延迟增加 16ms）。\n\n**G-Sync / FreeSync**：\n- 显示器刷新率跟随 GPU 帧率。\n- 无撕裂、无丢帧、低延迟。\n- 需要硬件支持。\n\n**选择**：\n- 竞技游戏：关 VSync（低延迟，接受撕裂）或 G-Sync。\n- 单机游戏：开 VSync（无撕裂）。\n- 移动端：通常开（屏幕刷新率固定）。",
+    "tags": [
+      "VSync",
+      "撕裂",
+      "三缓冲"
+    ]
+  },
+  {
+    "id": "rendering-016",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Draw Call 和 Batch 是什么？为什么是性能瓶颈？UE5 怎么优化？",
+    "answer": "**Draw Call**：\n- CPU 向 GPU 发出的一次绘制命令（如 DrawIndexed）。\n- 每次 draw call 有 CPU 开销（状态设置、参数传递、驱动开销）。\n\n**Batch（合批）**：\n- 把多个可合并的绘制合并成一个 draw call。\n- UE5 的 Mesh Draw Pipeline 自动处理：\n  - 自动 Instancing：相同 mesh + 材质合并。\n  - Mesh Batch：同材质的静态 mesh 合并。\n  - Dynamic Instancing：运行时按材质分组。\n\n**为什么是瓶颈**：\n- CPU 提交 draw call 有固定开销（几十到几百微秒）。\n- draw call 多 → CPU 卡（GPU 可能闲着）。\n- 移动端 CPU 弱，draw call 敏感（<1000）。\n\n**UE5 优化手段**：\n1. **Instancing**：相同 mesh + 材质自动合批（草、树）。\n2. **Merge Actors**：编辑器工具合并静态 mesh（类似 Unity 静态合批）。\n3. **HLOD（Hierarchical LOD）**：远处多物体合并成一组 mesh。\n4. **Nanite**：自动处理几何细节，draw call 极少。\n5. **材质合并**：合并图集、减少材质数。\n6. **LOD + Culling**：减物体数。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| SRP Batcher | Mesh Draw Pipeline（自动） |\n| 静态合批 | Merge Actors |\n| 动态合批 | Dynamic Instancing |\n| GPU Instancing | 自动 Instancing |\n\n**注意**：UE5 的 Instancing 是引擎自动做的，无需像 Unity 手动开材质开关。Nanite 进一步消除 draw call 瓶颈。\n\n**面试加分点**：stat scenerendering 看 DrawCalls 数；r.MeshDrawCommands.DynamicInstancing 控制动态合批；Nanite mesh 的 draw call 几乎恒定，与三角面数无关。",
+    "tags": [
+      "DrawCall",
+      "Batch",
+      "MeshDrawPipeline",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-017",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的合批机制有哪些？Mesh Draw Pipeline、Instancing、Merge Actors 的区别？",
+    "answer": "**1. 自动 Instancing（GPU Instancing）**：\n- 相同 mesh + 相同材质的实例一次 draw call。\n- per-instance 数据（Transform、LightmapUV）通过 instanced buffer 传。\n- UE5 引擎自动处理，无需材质手动开启。\n- 适合：草、树、石头等大量重复物。\n\n**2. Mesh Draw Pipeline（动态合批）**：\n- 运行时按材质分组，相同 shader 的 mesh 连续渲染。\n- 不重新绑定 shader 程序，减 CPU 开销。\n- 类似 Unity SRP Batcher，但 UE5 全自动。\n- draw call 数可能不变，但 CPU 开销大减。\n\n**3. Merge Actors（静态合并）**：\n- 编辑器工具，把多个静态 mesh 合并成大 mesh。\n- 运行时一次 draw call。\n- 优点：无运行时开销。\n- 缺点：合并后内存大；不能移动；失去 LOD。\n- 适合：静态场景物体（建筑、装饰）。\n\n**4. HLOD（Hierarchical LOD）**：\n- 远处多物体合并成一组 mesh。\n- 配合 LOD 一起用。\n\n**5. Nanite**：\n- 虚拟几何体，自动 cluster 级 LOD。\n- draw call 极少，与三角面数无关。\n- 适合：影视级静态几何。\n\n**组合使用**：\n- 静态场景 → Merge Actors / HLOD。\n- 大量重复物 → 自动 Instancing。\n- 复杂几何 → Nanite。\n- 其他 → Mesh Draw Pipeline（默认）。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| 静态合批 | Merge Actors |\n| 动态合批 | Dynamic Instancing（自动） |\n| GPU Instancing | 自动 Instancing |\n| SRP Batcher | Mesh Draw Pipeline |\n\n**面试加分点**：UE5 的 Instancing 无需材质支持 UNITY_SETUP_INSTANCE_ID，引擎自动；Nanite 把 mesh 分成 128 三角形的 cluster 独立剔除；r.MeshDrawCommands.LogDynamicInstancingStats 看合批统计。",
+    "tags": [
+      "合批",
+      "Instancing",
+      "MeshDrawPipeline",
+      "MergeActors",
+      "Nanite",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-018",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的渲染调试工具有哪些？如何分析 draw call 和性能？",
+    "answer": "UE5 没有 Unity 的 Frame Debugger，但有更强的工具链：\n\n**1. stat scenerendering**：\n- 控制台命令，显示 draw call 数、三角形数、Pass 耗时。\n- 快速定位瓶颈。\n\n**2. GPU Visualizer（ProfileGPU）**：\n- 控制台输入 `profilegpu`。\n- 按阶段分解 GPU 耗时（BasePass/Lighting/Translucency/PostProcess）。\n- 看每阶段 draw call 和耗时。\n\n**3. Unreal Insights**：\n- 现代 profiling 工具，CPU/GPU 时序分析。\n- 渲染线程、RHI 线程、GPU 时间轴对齐。\n- 支持帧间对比。\n\n**4. RenderDoc**：\n- 第三方工具，UE5 原生集成（Plugin）。\n- 逐 draw call 步进，查看 shader、纹理、RT、状态。\n- 抓帧分析 overdraw、shader 指令。\n- 类似 Unity Frame Debugger 但更强。\n\n**5. Visualize 模式**：\n- ShowFlag.VisualizeGBuffer / VisualizeSSAO / VisualizeLumen。\n- 查看各中间 buffer。\n\n**6. Lighting Only / Shader Complexity**：\n- Buffer Visualization > Shader Complexity 看 shader 指令数。\n- 找复杂 shader 像素。\n\n**使用场景**：\n- draw call 多 → stat scenerendering + Insights。\n- GPU 卡 → ProfileGPU 找耗时 pass。\n- 渲染错误 → RenderDoc 抓帧查状态。\n- overdraw → Quad Overdraw 视图。\n\n**和 Unity 的对比**：Unity Frame Debugger 是内置逐 draw call 工具；UE5 用 RenderDoc 替代（更强），ProfileGPU 对应 Frame Debugger 的概览。Insights 对应 Unity Profiler。\n\n**面试加分点**：`stat unit` 看 Game/Draw/RHI/GPU 线程分摊；`r.ViewDistanceScale` 调渲染距离；RenderDoc 抓帧前先 `r.RDG.CaptureCallbacksWithRenderDoc` 确保 RDG Pass 完整。",
+    "tags": [
+      "调试",
+      "RenderDoc",
+      "Insights",
+      "ProfileGPU",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-019",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "Ray Tracing（光线追踪）在实时渲染中的应用？代价？",
+    "answer": "RT 应用：\n\n**1. RT Reflections（RT 反射）**：\n- 光线追踪反射，可反射屏幕外、动态物体。\n- 比 SSR 准确。\n- 适合：水面、金属、镜子。\n\n**2. RT Shadows（RT 阴影）**：\n- 光线追踪阴影，精确软阴影。\n- 不需 Shadow Map，无锯齿。\n- 适合：复杂遮挡场景。\n\n**3. RT GI（RT 全局光照）**：\n- 光线追踪漫反射/镜面反射的全局光照。\n- 动态 GI（无需烘焙）。\n- 适合：动态光照场景。\n\n**4. RT Ambient Occlusion**：\n- 光线追踪 AO，比 SSAO 准确。\n\n**5. RT Caustics**：\n- 焦散（光通过水或玻璃聚焦）。\n\n**代价**：\n- 光线追踪每像素多次光线-场景求交，极贵。\n- 需 RT 硬件（NVIDIA RTX、AMD RX、Apple M3+）。\n- 1ms 内能打的光线数有限（<1 ray/pixel for 60FPS）。\n\n**优化**：\n- **降噪（Denoising）**：少量光线 + AI 降噪（DLSS RR、SVGF）。\n- **混合渲染**：RT 只做关键效果（反射、GI），其他用传统。\n- **半分辨率 RT**：降分辨率跑 RT。\n- ** selectively RT**：只特定物体/区域用 RT。\n\n**现状**：\n- PC 高端：RT 反射 + 阴影 + GI 可用。\n- 主机（PS5/XSX）：有限 RT。\n- 移动：基本不用（硬件不支持或太贵）。\n\n未来：RT 逐渐普及，但仍需传统渲染 fallback。",
+    "tags": [
+      "RayTracing",
+      "RT",
+      "光追"
+    ]
+  },
+  {
+    "id": "rendering-020",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "UE5 全局光照（GI）的方案：实时 GI、烘焙 GI、混合 GI？Lumen 怎么选？",
+    "answer": "**实时 GI**：\n- 运行时计算间接光。\n- **Lumen（UE5 核心）**：Surface Cache + Screen Space GI + Voxel Tracing，动态场景实时 GI，PC/主机默认。\n- 优点：动态光照变化正确（昼夜、可移动物体）。\n- 缺点：贵、移动端不支持。\n\n**烘焙 GI（Lightmass）**：\n- 离线计算光照，存到 Lightmap + Volume Lightmap。\n- 运行时采样，极廉价。\n- 优点：质量高、运行时免费。\n- 缺点：只静态物体、静态光；Lightmap 占内存；烘焙慢。\n- 适合：移动端、静态场景。\n\n**混合 GI**：\n- 静态物体烘焙 + 动态物体实时。\n- **APV（Adaptive Probe Volumes）**：自适应探针体积，动态物体采样探针获间接光。\n- **Sky Light + HDRI**：天光采样环境贴图。\n- 优点：质量好、性能可控。\n- 缺点：探针布置、静态/动态分离。\n\n**UE5 方案选择**：\n| 场景 | GI 方案 | 原因 |\n| PC 3A | Lumen | 实时动态、质量高 |\n| 移动端 | Lightmass + Sky Light | 性能敏感 |\n| VR | Lightmass + 反射捕获 | 低延迟 |\n| 室内漫游 | Lumen 或 APV | 动态光 |\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| Enlighten（预计算实时 GI） | Lumen（完全实时） |\n| Progressive Lightmapper | Lightmass |\n| APV (HDRP) | APV（共享概念） |\n| DDGI (HDRP) | Lumen 内部用类似方案 |\n\n**面试加分点**：Lumen Surface Cache 把场景表面光照缓存到 voxel；Lumen Final Quality 用光线追踪提升质量（需 RT 硬件）；移动端用 Lightmass + Volume Lightmap + Sky Light 模拟 GI；r.Lumen.ScreenProbeGather.TracingRayCount 调 Lumen 质量。",
+    "tags": [
+      "GI",
+      "Lumen",
+      "Lightmass",
+      "APV",
+      "全局光照",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-021",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Lightmap 烘焙的原理？UV2 是什么？",
+    "answer": "原理：\n- 离线计算静态物体在静态光下的光照。\n- 把光照结果存到纹理（lightmap）。\n- 运行时物体采样 lightmap，叠加到最终颜色。\n\n**Lightmap UV（UV2）**：\n- 普通纹理 UV（UV1）用于贴图采样。\n- Lightmap 需要独立 UV，避免拉伸、重叠。\n- UV2 是 lightmap 专用 UV。\n- 要求：\n  - 不重叠（每个面独立区域）。\n  - 紧凑排列（省空间）。\n  - 比例合理（重要区域大）。\n\n**UE5 生成 UV2**：\n- Import Settings → Generate Lightmap UVs。\n- 自动生成。\n- 也可 DCC 工具手动生成（更好控制）。\n\n**烘焙流程**：\n1. 标记物体 Static（Lightmap Static）。\n2. Lightmapping Settings 配置。\n3. Progressive Lightmapper 烘焙。\n4. 生成 lightmap 纹理 + 物体的 UV2 映射。\n\n**参数**：\n- Lightmap Resolution（每世界单位的 texel 密度）。\n- Max Lightmap Size（2048 或 4096）。\n- Compression（压缩省内存，质量略降）。\n- Directional Mode（方向光信息，Normal/Lightmap）。\n\n**问题**：\n- 物体移动 → lightmap 错位（需重烘焙）。\n- 动态光不参与烘焙（需实时）。\n- 大场景 lightmap 占内存多。\n- 烘焙时间长（Progressive 可增量）。",
+    "tags": [
+      "Lightmap",
+      "UV2",
+      "烘焙"
+    ]
+  },
+  {
+    "id": "rendering-022",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的光照探针体系是什么？Lightmass Importance Volume 和 APV 怎么用？",
+    "answer": "UE5 的光照探针体系分两套：\n\n**1. Lightmass + Volume Lightmap（烘焙探针）**：\n- Lightmass 烘焙时计算间接光，存到 Lightmap（静态物体）+ Volume Lightmap（空间体积光照）。\n- **Lightmass Importance Volume**：定义烘焙重点区域，范围内采样密，范围外稀疏。\n- 动态物体采样 Volume Lightmap 获得间接光（类似 Unity Light Probe 的 SH，但是体积化的）。\n- 优点：质量高、运行时廉价。\n- 缺点：静态、烘焙慢。\n\n**2. APV（Adaptive Probe Volumes）**：\n- UE5 的高级探针系统（5.0+）。\n- 自适应密度（重要区域密，角落加密）。\n- 体积探针，存 SH 系数。\n- 支持动态物体采样。\n- 比 Volume Lightmap 更灵活，可部分更新。\n\n**球谐（Spherical Harmonics）**：\n- 用低阶 SH（L2，9 系数）表示环境光方向分布。\n- 足够表示漫反射环境光，不适合高光（高光要 Reflection Capture）。\n\n**使用场景**：\n- 动态角色在静态场景移动，接收环境光。\n- 配合 Lightmap（静态物体用 Lightmap，动态物体用探针）。\n- 室内外过渡处探针加密。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| Light Probe Group | Lightmass Importance Volume |\n| Light Probe (点探针) | Volume Lightmap (体积) |\n| APV (HDRP) | APV（同概念） |\n\nUE5 的 Volume Lightmap 是体积化的，比 Unity 点探针插值更准。\n\n**面试加分点**：APV 支持运行时 streaming（分块加载）；Volume Lightmap 用 BVH 加速采样；ShowFlag.VisualizeVolumeLightmaps 查看探针分布；移动端用 Lightmass + Sky Light 模拟 GI，探针开销极低。",
+    "tags": [
+      "LightProbe",
+      "VolumeLightmap",
+      "APV",
+      "球谐",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-023",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Reflection Probe（反射探针）是什么？什么时候用？",
+    "answer": "Reflection Probe：在场景某点烘焙一张 Cubemap，用于环境反射。\n\n**用途**：\n- PBR 的高光 IBL（image-based lighting）。\n- 金属、玻璃、水面等的反射。\n- 比 SSR 便宜（预烘焙）。\n\n**类型**：\n- Baked：编辑时烘焙（静态场景）。\n- Realtime：运行时渲染（动态场景，贵）。\n- Custom：自定义 Cubemap。\n\n**布置**：\n- 在反射重要的区域放（房间、街道）。\n- 室内外过渡处。\n- 重要反射物体附近。\n\n**运行时**：\n- 物体根据位置选最近 probe。\n- 多 probe 间 blend（无缝过渡）。\n- probe 的 Cubemap 预滤波（不同 mip = 不同粗糙度）。\n\n**问题**：\n- probe 烘焙的是该点的视角，物体用附近 probe 可能不准（角色在 probe 中心外）。\n- 动态物体反射不到（除非 real-time probe）。\n- real-time probe 贵（每帧渲染 Cubemap）。\n\n**优化**：\n- real-time probe 降分辨率（128 或 256）。\n- 隔帧更新或时间切片。\n- 重要区域用 planar reflection（更准）。\n- 配合 SSR（probe 兜底，SSR 屏幕内）。\n\n移动端：用烘焙 probe + 1-2 张 Cubemap，不开实时。",
+    "tags": [
+      "ReflectionProbe",
+      "反射",
+      "Cubemap"
+    ]
+  },
+  {
+    "id": "rendering-024",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "渲染中的剔除（Culling）有哪些？",
+    "answer": "**1. 视锥剔除（Frustum Culling）**：\n- 物体不在相机视锥内 → 不渲染。\n- 基于 bounding volume（AABB/OBB）和视锥相交测试。\n- UE5 自动做。\n- 层级（BVH/八叉树）加速。\n\n**2. 遮挡剔除（Occlusion Culling）**：\n- 物体在视锥内但被其他物体挡住 → 不渲染。\n- UE5 内置 Occlusion Culling 系统。\n- 需要烘焙遮挡数据（静态物体）。\n- 基于单元格（cell）或 POTree。\n- 适合：室内场景（墙遮挡多）。\n- 不适合：开阔场景。\n\n**3. 层级距离剔除（Distance Culling）**：\n- 物体距离太远 → 不渲染或降级。\n- LOD 配合。\n- 特效常用（远距离关特效）。\n\n**4. 背面剔除（Backface Culling）**：\n- 三角形背向相机 → 不渲染。\n- GPU 硬件做（Cull Back）。\n- 默认开。\n\n**5. Early-Z（Z-Cull）**：\n- 被深度遮挡的片元不执行 shader。\n- GPU 硬件做。\n- 需 ZWrite On、不透明。\n\n**6. Portal Culling**：\n- 室内场景用 portal（门、窗）判断可见区域。\n- 自定义实现。\n- UE5 内置 Occlusion 类似。\n\n**7. 视点剔除**：\n- 第一人称手部模型只在第一人称视图渲染。\n- 按相机模式选层。\n\n**影响**：剔除是性能关键，没剔除 = 全场景渲染 = 灾难。",
+    "tags": [
+      "剔除",
+      "Culling",
+      "Frustum"
+    ]
+  },
+  {
+    "id": "rendering-025",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "LOD（Level of Detail）的原理和配置？LOD 切换的 pop-in 怎么解决？",
+    "answer": "原理：\n- 物体根据距离切换不同精度的 mesh。\n- 近距离用高精度（LOD0），远距离低精度（LOD1-3）。\n- 减少顶点数和 draw call 开销。\n\n**UE5 LOD Group**：\n- 配置多个 LOD 级别。\n- 每级别设 mesh 和屏幕占比阈值。\n- Screen Size：物体在屏幕的占比，低于阈值切下一级。\n\n**典型配置**：\n- LOD0：100%-60%，主角、近物。\n- LOD1：60%-30%，简化 50% 面。\n- LOD2：30%-10%，简化 75%。\n- LOD3：<10%，最低或 culled。\n\n**Pop-in（切换跳变）问题**：\n- LOD 切换时模型突然变化，视觉跳变。\n- 解决：\n  - **LOD Cross Fade**：切换时两 LOD 交叉淡入淡出（dither）。\n  - **SpeedTree**：植被专用平滑过渡。\n  - **几何对齐**：LOD 之间形状尽量一致（ProBuilder 优化）。\n  - **阈值合理**：切换距离不要在玩家常经过处。\n  - **HLOD**：远处多物体合并成一组 LOD。\n\n**优化**：\n- LOD 切换阈值测试（不要在视线内频繁切）。\n- LOD 之间面数差不要过大（2-3 倍）。\n- LOD 切换也切 shader（高 LOD 用 PBR，低 LOD 用 Unlit）。\n- 远 LOD 用更低分辨率贴图。\n- 配合剔除（最远 LOD 后 culled）。\n\n**Nanite（UE5）**：\n- 自动 LOD（微观三角级）。\n- 无 pop-in。\n- 像素级精度。\n- 需要特定管线。",
+    "tags": [
+      "LOD",
+      "pop-in",
+      "细节层次"
+    ]
+  },
+  {
+    "id": "rendering-026",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的自动 Instancing 原理和限制？材质如何配合 Instancing？",
+    "answer": "原理：\n- UE5 的 Mesh Draw Pipeline 自动对相同 mesh + 相同材质的实例合并为一次 draw call。\n- per-instance 数据（Transform、LightmapUV、CustomData）通过 instanced buffer 传。\n- GPU 内部循环每个实例渲染。\n- 无需像 Unity 手动开材质 \"Enable GPU Instancing\"。\n\n**限制**：\n- 必须相同 mesh（StaticMesh 资产）。\n- 必须相同材质（Material 或 Material Instance，不同 MID 可合批）。\n- 不同材质实例（不同纹理）打断合批，除非用 Texture Atlas。\n- 阴影 / 深度 pass 也自动 instancing。\n\n**材质配合**：\n- UE5 材质无需特殊宏（不像 Unity 的 UNITY_SETUP_INSTANCE_ID）。\n- per-instance 属性通过材质节点访问：\n  - **PerInstanceCustomData**：每实例自定义数据（如颜色、缩放）。\n  - **PerInstanceRandom**：每实例随机数（用于随机变色）。\n  - **ObjectPivotPosition**：实例位置。\n- 需要在 mesh 组件上设置 PerInstanceCustomData（C++ / Blueprint）。\n\n**Blueprint 示例**：\n- InstancedStaticMeshComponent 添加实例，SetCustomData 设 per-instance 属性。\n- 材质用 PerInstanceCustomData 节点读取。\n\n**HISM（Hierarchical InstancedStaticMeshComponent）**：\n- 支持 LOD 和 culling 的 Instancing。\n- 适合植被、石头等大量重复物。\n\n**适用**：\n- 草地、树木、石头。\n- 程序化生成对象。\n- 重复装饰物。\n\n**和 Unity 的对比**：\n| Unity | UE5 |\n| #pragma multi_compile_instancing | 无需，引擎自动 |\n| UNITY_SETUP_INSTANCE_ID | 无需 |\n| MaterialPropertyBlock | PerInstanceCustomData / MID |\n| GPU Instancing 开关 | 自动 |\n\n**面试加分点**：UE5 的 Dynamic Instancing 运行时按材质分组，r.MeshDrawCommands.DynamicInstancing 可关；HISM 比 ISM 多 culling，大量植被必用；Nanite 自带 cluster 级 instancing，比传统 Instancing 更强。",
+    "tags": [
+      "GPUInstancing",
+      "MeshDrawPipeline",
+      "PerInstanceCustomData",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-027",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "GPU 顶点处理和片元处理的开销差异？什么时候是顶点瓶颈？",
+    "answer": "开销差异：\n- 顶点数通常远小于像素数（10万顶点 vs 200万像素）。\n- 顶点着色器每顶点一次，片元每像素多次（overdraw）。\n- 通常片元是瓶颈，顶点不是。\n\n**顶点瓶颈场景**：\n1. **高模低分辨率**：\n   - 4K 面角色在 1080p 屏幕上，每顶点处理但只占几像素。\n   - 顶点数多，片元少。\n   - 解决：LOD、法线贴图代替高模。\n\n2. **顶点位移 shader**：\n   - 顶点 shader 复杂（位移、噪声计算）。\n   - 顶点开销大。\n   - 解决：简化顶点 shader、tessellation 适度。\n\n3. **大量小三角形**：\n   - 程序化生成密集网格（草地、毛发）。\n   - 三角形设置开销（光栅化）。\n   - 解决：合并、Mesh Shader。\n\n4. **Skinned Mesh**：\n   - 蒙皮动画每顶点计算骨骼权重。\n   - 角色多时顶点开销大。\n   - 解决：减面、LOD、GPU 蒙皮。\n\n**判断瓶颈**：\n- Profiler GPU Module 看 Vertex/Fragment 比例。\n- RenderDoc 看阶段耗时。\n- 实验：降低顶点数看帧率是否提升（顶点瓶颈）vs 降低分辨率看帧率（片元瓶颈）。\n\n**优化**：\n- 顶点瓶颈：LOD、减面、简化 shader、GPU 蒙皮。\n- 片元瓶颈：减 overdraw、简化 shader、降分辨率。",
+    "tags": [
+      "顶点",
+      "片元",
+      "瓶颈"
+    ]
+  },
+  {
+    "id": "rendering-028",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "渲染性能优化的整体思路？从哪几个维度分析？",
+    "answer": "**四个维度**：\n\n**1. CPU 瓶颈**：\n- draw call 数（合批）。\n- 蒙皮计算（GPU 蒙皮）。\n- 物理碰撞。\n- 脚本逻辑（Update）。\n- 优化：合批、LOD、剔除、Job/Burst。\n\n**2. GPU 顶点瓶颈**：\n- 高模、顶点 shader 复杂、蒙皮。\n- 优化：LOD、减面、GPU 蒙皮、简化 shader。\n\n**3. GPU 片元瓶颈**：\n- overdraw、shader 复杂、全屏后处理。\n- 优化：减 overdraw、AlphaTest、简化 shader、降后处理分辨率。\n\n**4. 带宽瓶颈**：\n- 纹理采样多、render target 切换、全屏 SceneTexture 采样。\n- 优化：减纹理采样、合并通道、避免全屏抓屏采样。\n\n**分析工具**：\n- UE5 Profiler（CPU/GPU）。\n- Frame Debugger（draw call）。\n- RenderDoc（指令级）。\n- Snapdragon Profiler（移动 GPU）。\n- Xcode GPU Capture（iOS）。\n- RenderDoc GPU Replay。\n\n**优化流程**：\n1. 测量（Profiler）。\n2. 定位瓶颈（哪个维度）。\n3. 针对优化。\n4. 验证（重测）。\n5. 记录 before/after。\n\n**原则**：\n- 先优化最大瓶颈（80/20）。\n- 测量驱动，不盲目优化。\n- 平台分级（PC/移动）。\n- 性能预算管理。",
+    "tags": [
+      "优化",
+      "性能",
+      "GPU"
+    ]
+  },
+  {
+    "id": "rendering-029",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "渲染中的 Render Target 切换为什么贵？移动端怎么避免？UE5 怎么处理？",
+    "answer": "Render Target 切换代价：\n\n**TBR/TBDR 架构（移动）**：\n- 渲染在 Tile Memory（片上缓存）进行。\n- 切换 RT 时，要把当前 Tile 内容写回显存（tile resolve），再加载新 RT（tile load）。\n- 带宽和功耗爆。\n- 多个全屏 RT 切换 = 多次往返。\n\n**PC（IMR）**：\n- RT 在显存，切换不涉及搬运，但仍需刷新缓存。\n- 代价小些，频繁切换仍影响。\n\n**UE5 / 移动端避免手段**：\n\n**1. RDG 自动管理 RT 生命周期**：\n- UE5 的 RDG 自动复用 RT 内存，减少分配。\n- 自动插入屏障，减少不必要切换。\n\n**2. 减少 RT 数量**：\n- 合并 pass（多个后处理合并到 Uber Post）。\n- MRT 一次写多个（如 G-Buffer）。\n- 后处理降级（少 pass）。\n\n**3. 批量处理**：\n- 同一 RT 的物体连续渲染。\n- 按 RT 排序绘制（Mesh Draw Pipeline 自动）。\n\n**4. Clear/Load 操作**：\n- RDG 自动用 DontCare 跳过加载（整屏重画时）。\n- 避免不必要的 Clear。\n\n**5. SceneTexture 节点（替代 GrabPass）**：\n- UE5 没有 Unity 的 GrabPass（每 object 一次 RT 切换，灾难）。\n- 用 SceneTexture: PostProcessInput0 / SceneDepth / SceneColor 节点采样当前画面。\n- 一次拷贝，所有材质共享。\n- 移动端友好。\n\n**6. 后处理合并**：\n- 多个后处理合并到一个 shader（Uber Post）。\n- UE5 自动合并简单后处理。\n\n**7. 深度纹理**：\n- UE5 自动生成 SceneDepth（Deferred 直接读 G-Buffer，Forward 单独 Depth Pass）。\n- 避免每个 shader 各自渲染深度。\n\n**和 Unity 的对比**：Unity URP 的 Opaque Texture 一次拷贝共享；UE5 的 SceneTexture 是原生机制，更高效。GrabPass 在 UE5 无对应（设计上避免）。\n\n**面试加分点**：r.MobileHDR 控制移动 HDR；Mali Streamline / Snapdragon Profiler 看 RT 切换次数；RDG 的 Pass 合并减少 RT 切换，r.RDG.Debug 可查看。",
+    "tags": [
+      "RenderTarget",
+      "切换",
+      "移动端",
+      "SceneTexture",
+      "RDG",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-030",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "渲染中的 Rebuild / Dirty 是什么？UE5 里哪些环节会触发？",
+    "answer": "Rebuild：重新计算渲染相关数据（UI 几何、粒子参数、材质参数、mesh 数据）。\n\n**Dirty Flag 模式**：\n- 标记数据已变化，需要重新计算。\n- 避免每帧全量计算（只在变化时算）。\n- 常见：数据变 → SetDirty()，渲染前 CheckDirty()，dirty 则 Rebuild。\n\n**UE5 中的 Rebuild 场景**：\n\n**1. UMG / Slate UI Rebuild**：\n- UI 元素（Widget）变化（位置、颜色、文本）→ Slate Invalidate。\n- 触发几何重算 + 重绘。\n- 拆 Widget（独立 Canvas Panel）减少 Rebuild 范围。\n- 类似 Unity Canvas Rebuild。\n\n**2. Material Instance 更新**：\n- MID 改参数 → 重新上传 GPU uniform。\n- 通常廉价。\n- 触发 uniform buffer dirty。\n\n**3. Mesh Draw Command Rebuild**：\n- 场景变化（加物体、改材质）→ Mesh Draw Pipeline 重新生成 draw command。\n- Dynamic Instancing 重新分组。\n- 开销较大，避免频繁触发。\n\n**4. Niagara 粒子 Rebuild**：\n- 粒子参数变化 → 重新计算 emitter 数据。\n- 每帧粒子更新算 Rebuild。\n- GPU 粒子在 Compute Shader 更新。\n\n**5. Lightmap / Reflection Capture Rebuild**：\n- 场景光照变化 → 重新烘焙（编辑器）。\n- 运行时一般不触发。\n\n**6. Lumen Surface Cache Update**：\n- 场景几何变化 → Lumen 更新 Surface Cache。\n- 异步更新，避免卡顿。\n\n**优化**：\n- 减少 Rebuild 范围（拆 Widget、分粒子系统）。\n- 避免不必要的 Dirty（不变化不设）。\n- 缓存计算结果。\n- Mesh Draw Command 缓存（Static 场景不 Rebuild）。\n\n**和 Unity 的对比**：Unity Canvas.SendWillRenderCanvases 对应 UE5 Slate Invalidate；Unity ParticleSystem.Update 对应 Niagara tick。UE5 的 Mesh Draw Command 缓存比 Unity 更激进。\n\n**面试加分点**：Slate 的 Invalidate 分多种（Layout/Paint/Geomtry）；r.MeshDrawCommands.CacheStaticMeshes 缓存静态 mesh 命令；Niagara 的 Simulation Tick 可设 Fixed / Scalable。",
+    "tags": [
+      "Rebuild",
+      "Dirty",
+      "Slate",
+      "MeshDrawCommand",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-031",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Render Texture 的用途和优化？",
+    "answer": "用途：\n- 后处理（Bloom、SSAO 等中间结果）。\n- 屏幕特效（扭曲、扫描）。\n- 小地图（俯视相机渲染）。\n- 角色预览（UI 显示 3D 模型）。\n- 反射（Planar Reflection）。\n- 安全摄像头画面。\n- 动态阴影（实时阴影贴图）。\n\n**优化**：\n\n**1. 分辨率**：\n- 按用途选分辨率，不要全屏。\n- 小地图 256×256 够。\n- 后处理降采样（半分辨率）。\n- 预览 512×512。\n\n**2. 格式**：\n- 颜色：RGBA32（LDR）或 RGBA16F（HDR）。\n- 深度：Depth/ShadowMap。\n- 移动端避免 RGBA32F（太贵）。\n\n**3. 复用**：\n- 同一 RT 多个效果复用（用完 Clear）。\n- RT 池化。\n\n**4. 更新频率**：\n- 静态内容一次渲染，复用（小地图）。\n- 动态内容按需更新（隔帧）。\n- 降低预览相机帧率（30FPS）。\n\n**5. 释放**：\n- 不用时 Release（释放 GPU 内存）。\n- 重新创建有开销，频繁用则保留。\n\n**6. MSAA**：\n- RT 可开 MSAA，但显存翻倍。\n- 移动端慎用。\n\n**问题**：\n- RT 切换贵（TBR 架构）。\n- 全屏 RT 多 = 带宽爆。\n- Readback 到 CPU 慢（避免）。\n\n**RenderTextureDescriptor**：\n- 规范化创建 RT。\n- 支持自动降级（移动端）。",
+    "tags": [
+      "RenderTexture",
+      "RT",
+      "优化"
+    ]
+  },
+  {
+    "id": "rendering-032",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "UE5 的 Post Process Volume 系统是什么？怎么用？",
+    "answer": "Post Process Volume：UE5 的后处理和场景配置系统（类似 Unity URP/HDRP 的 Volume）。\n\n**结构**：\n- **Post Process Volume**：场景组件，定义后处理影响范围。\n- **Weight**：Volume 强度（0-1）。\n- **Priority**：优先级（多 Volume 重叠时）。\n- **Blend Radius**：边缘渐变距离。\n- **Infinite Extent**：勾选则全场景生效（Global Volume）。\n\n**Volume 类型**：\n- Global（Infinite Extent 勾选）：全场景生效。\n- Box Volume：盒形区域内生效。\n- 按需配置 Blend Radius 做平滑过渡。\n\n**Blend**：\n- 多 Volume 重叠时，按 Priority 和 Weight blend。\n- 相机进入/离开 Volume 时平滑过渡。\n\n**配置内容**：\n1. **后处理**：Bloom、DOF、Color Grading、Tone Mapping、Motion Blur、Vignette、Chromatic Aberration、Lens Flare、SSR、SSAO 等。\n2. **渲染配置**：雾、曝光、LOD 偏移、屏幕百分比。\n3. **Post Process Material**：挂载自定义 PPM。\n\n**用途**：\n1. **全局后处理**：Bloom、Color Grading、Tone Mapping。\n2. **区域效果**：\n   - 室内暖色调，室外冷色调。\n   - 危险区域红色 fog。\n   - 水下蓝色扭曲（PPM）。\n3. **过场动画**：不同镜头切 Volume。\n\n**使用**：\n- 放置 Post Process Volume 到场景。\n- Details 面板勾选要覆盖的属性，调值。\n- Blueprint / C++ 运行时改 Volume.Weight 切换。\n\n**和 Unity 的对比**：\n| Unity URP Volume | UE5 Post Process Volume |\n| Volume Profile（资产） | Volume 直接配（无独立 Profile 资产） |\n| Global/Box/Sphere/Mesh | Global(Box)/Box |\n| Weight/Priority/Blend Distance | Weight/Priority/Blend Radius |\n\nUE5 的 Volume 配置直接存在组件上，Unity 用独立 Profile 资产复用。\n\n**面试加分点**：PPM 的 Blending Location 决定插入时机；r.PostProcessing.PropagateColor Calibratio 全局调色；多个 Volume 按优先级叠加，非覆盖；移动端精简 Volume（只 Bloom + Color Grading）。",
+    "tags": [
+      "PostProcessVolume",
+      "后处理",
+      "Volume",
+      "UE5"
+    ]
+  },
+  {
+    "id": "rendering-033",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "深度缓冲（Depth Buffer）的用途？",
+    "answer": "深度缓冲：每像素存深度值（z），用于深度测试。\n\n**核心用途**：\n\n**1. 深度测试**：\n- 每片元比较深度，决定是否覆盖。\n- 实现正确遮挡。\n\n**2. Early-Z 剔除**：\n- 片元 shader 前比较深度，被挡的丢弃。\n- 节省 shader。\n\n**3. Z-Prepass**：\n- 先填深度，再渲染主 shader 时 Early-Z 高效剔除。\n\n**4. 后处理**：\n- 重建世界位置（SSAO、SSR、DOF）。\n- 雾（按深度衰减）。\n- Motion Blur（深度 aware）。\n\n**5. 软粒子**：\n- 粒子接近场景几何时淡出（基于深度差）。\n- 避免粒子硬切入物体。\n\n**6. 屏幕空间效果**：\n- 屏幕空间扫描（按深度）。\n- 屏幕空间 dissolve。\n\n**7. 阴影贴图**：\n- 阴影贴图本质是深度缓冲（从光源视角）。\n\n**8. Decal**：\n- 按 depth 重建位置贴贴花。\n\n**格式**：\n- D16：16 位深度，省内存。\n- D24S8：24 位深度 + 8 位 stencil。\n- D32F：32 位浮点，高精度。\n- 移动端常用 D24S8。\n\n**注意**：\n- 深度精度问题（远处 z-fighting）。\n- Reverse-Z（近大远小）改善精度。\n- 透明物体不写深度（ZWrite Off）。",
+    "tags": [
+      "深度缓冲",
+      "Depth",
+      "ZBuffer"
+    ]
+  },
+  {
+    "id": "rendering-034",
+    "category": "rendering",
+    "difficulty": "中级",
+    "question": "Z-fighting 是什么？怎么解决？",
+    "answer": "Z-fighting：深度值相近的片元互相闪烁（两平面重合时）。\n\n**原因**：\n- 深度缓冲精度有限。\n- 两平面距离 < 精度差，深度值相同，无法判断谁前谁后。\n- 每帧渲染顺序微变 → 闪烁。\n\n**常见场景**：\n- 贴花和地面重合。\n- 双层墙面。\n- 衣物和身体贴合。\n- 远距离物体（深度精度降低）。\n\n**解决**：\n\n**1. 物理偏移**：\n- 两平面错开（微小偏移，0.001）。\n- 贴花用 polygon offset。\n\n**2. Polygon Offset**：\n- shader 设 `Offset factor, units`。\n- 拉深或拉浅深度值。\n- 例：`Offset -1, -1`（拉前）。\n\n**3. 深度精度**：\n- 用高精度深度格式（D32F）。\n- 调近裁剪面（near clip 别太近，near 越近精度越差）。\n\n**4. Reverse-Z**：\n- 1/z 代替 z，近处精度高。\n- 现代管线默认。\n\n**5. Stencil**：\n- 贴花用 Stencil 区分，不依赖深度。\n\n**6. 几何修复**：\n- 美术修正重合几何。\n- 贴花略浮起（0.01）。\n\n**7. LOD**：\n- 远距离用简化几何，减少重合。\n\n**注意**：\n- 移动端精度更差，更易 z-fighting。\n- near clip 设 0.01 比 0.1 精度差很多。\n- 大世界场景远距离必 z-fighting，需分块渲染。",
+    "tags": [
+      "Z-fighting",
+      "深度",
+      "闪烁"
+    ]
+  },
+  {
+    "id": "rendering-035",
+    "category": "rendering",
+    "difficulty": "高级",
+    "question": "渲染管线的未来趋势？Mesh Shader、Visibility Buffer、Nanite？",
+    "answer": "**1. Mesh Shader**：\n- 新的 GPU 管线阶段（替代顶点/几何 shader）。\n- 直接处理 meshlet（小三角形组）。\n- 优势：\n  - 剔除粒度更细（meshlet 级别）。\n  - 减少三角形设置开销。\n  - 大量小三角形高效。\n- 需 SM 6.5+（DX12 Ultimate）。\n- 适合：高密度几何（植被、毛发、复杂场景）。\n\n**2. Visibility Buffer**：\n- 替代 G-Buffer 的新方案。\n- 第一 pass 只存 \"每像素可见的三角形 ID + 重心坐标\"。\n- 第二 pass 按需计算材质和光照。\n- 优势：\n  - 比 G-Buffer 省带宽（少数据）。\n  - 材质多样性友好（按需算）。\n  - 多光源高效。\n- 适合：高几何复杂度 + 多材质。\n\n**3. Nanite（UE5）**：\n- 自动微观 LOD。\n- 像素级精度（每像素一个三角形）。\n- 无 pop-in。\n- 流式加载。\n- 基于 Mesh Shader + Visibility Buffer + cluster。\n- 适合：影视级静态几何。\n\n**4. RT 普及**：\n- RT 反射、阴影、GI 逐渐主流。\n- 移动 RT（Apple M3+、Snapdragon 8 Gen3）。\n- 混合渲染（RT + 传统）。\n\n**5. AI 辅助**：\n- DLSS / FSR / XeSS 超分。\n- AI 降噪（RT）。\n- AI 帧生成。\n\n**6. 可变着色率（VRS）**：\n- 不同区域不同着色率。\n- 中心高精度，边缘低。\n- 省 GPU。\n\n**未来**：几何更复杂、光照更准、AI 辅助、硬件 RT。移动端逐渐追上 PC。",
+    "tags": [
+      "MeshShader",
+      "VisibilityBuffer",
+      "Nanite",
+      "未来"
+    ]
+  }
+]

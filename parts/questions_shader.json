@@ -1,0 +1,885 @@
+[
+  {
+    "id": "shader-001",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "UE5 材质（Material）的基本结构是什么？Material Expression、Material Function、Material Instance 各自的作用？",
+    "answer": "**UE5 材质体系三层结构**：\n\n**1. Material（材质资产，.uasset）**：\n- 在 Material Editor 中编辑，节点图（Graph）形式\n- 核心输入引脚（Main Material Node）：Base Color / Metallic / Specular / Roughness / Normal / Emissive Color / Opacity / Opacity Mask / World Position Offset (WPO) / Tessellation Multiplier\n- Shading Model：Unlit / Default Lit / Subsurface / Hair / Cloth / Eye / ClearCoat\n- Blend Mode：Opaque / Masked / Translucent / Additive / Modulate\n\n**2. Material Expression（材质表达式节点）**：\n- 最小运算单元：Add/Multiply/Power/Sine/TextureSample 等\n- 每个节点对应一段 HLSL 代码\n- 内置节点约 200 个，覆盖数学/纹理/向量/光照/坐标\n- **Custom node**：直接写 HLSL 代码\n\n**3. Material Function（材质函数）**：\n- 可复用的节点组（类似 Unity SubGraph）\n- 封装逻辑，跨材质复用\n- 有 Input/Output 引脚，参数化\n- 引擎内置大量 MF（如 MF_SphereMask、MF_VoronoiNoise）\n\n**4. Material Instance**：\n- 基于 Parent Material 的轻量实例\n- **MID（Material Instance Dynamic）**：运行时创建，可动态改参数\n- **MIC（Material Instance Constant）**：编辑器预设，静态\n- 只能改 Parent 暴露为 Parameter 的引脚\n\n**和 ShaderLab 的对比**：\n| Unity ShaderLab | UE5 Material |\n| Properties 块 | Parameter 节点（ScalarParameter 等） |\n| SubShader | Material Asset 本身 |\n| Pass | 由 Blend Mode/Shading Model 自动决定 |\n| Fallback | UE5 不需要，材质系统统一 |\n| HLSLPROGRAM | Custom node |\n| Tags | Material 属性面板设置 |\n\n**面试加分点**：UE5 材质是数据驱动的，Material Editor 编译成 HLSL，再由 Shader Compile Worker 编译成各平台目标格式；Material Domain（Surface/Decal/Post Process/UI/Light Function）决定材质用途。",
+    "tags": [
+      "Material",
+      "MaterialEditor",
+      "MaterialFunction",
+      "基础",
+      "结构"
+    ]
+  },
+  {
+    "id": "shader-002",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "UE5 材质参数有哪些类型？如何在 Blueprint/C++ 中访问和修改它们？",
+    "answer": "**UE5 材质参数类型**：\n\n| 节点 | 类型 | 用途 |\n|------|------|------|\n| ScalarParameter | float | 数值（粗糙度/强度） |\n| VectorParameter | float4 | 颜色/向量 |\n| TextureSampleParameter2D | Texture2D | 贴图 |\n| StaticSwitchParameter | bool | 静态分支（编译期） |\n| TextureObjectParameter | Texture ref | 纹理引用 |\n| RuntimeVirtualTextureParameter | RVT | 运行时虚拟纹理 |\n\n**运行时修改方式**：\n\n**1. MID（Material Instance Dynamic）—— 推荐**：\n```cpp\nUMaterialInstanceDynamic* MID = MeshComp->CreateAndSetMaterialInstanceDynamic(0);\nMID->SetScalarParameterValue(FName(\"Roughness\"), 0.5f);\nMID->SetVectorParameterValue(FName(\"BaseColor\"), FLinearColor::Red);\nMID->SetTextureParameterValue(FName(\"MainTex\"), MyTexture);\n```\n- MID 是 Parent Material 的运行时实例，改参数不重新编译\n- 每个组件可创建独立 MID\n\n**2. MIC（Material Instance Constant）**：编辑器预设，运行时不可改\n\n**3. Material Parameter Collection**：\n- 全局参数集，所有材质共享\n- UMaterialParameterCollection + SetScalarParameterValue\n- 适合全局风控参数（风强、时间、昼夜）\n\n**和 Unity 的区别**：\n- Unity 用 MaterialPropertyBlock 避免 new Material 开销，且不破坏 batching\n- UE5 的 MID 本身就是轻量实例，引擎原生支持\n- UE5 鼓励\"一个 Parent + 多个 MID\"的模式\n\n**面试加分点**：StaticSwitchParameter 是编译期分支，不增加运行时开销但增加变体数；MID 改参数触发 uniform upload，但比重新编译 Material 便宜得多。",
+    "tags": [
+      "参数",
+      "MID",
+      "MaterialInstance",
+      "Blueprint"
+    ]
+  },
+  {
+    "id": "shader-003",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "Shader 中的 Tags 有什么作用？列举常见 Tag 及其含义。",
+    "answer": "Tags 是键值对，告诉引擎如何调度这个 SubShader/Pass。\n\n**SubShader Tags**：\n- `Queue`：渲染队列（Background=1000, Geometry=2000, AlphaTest=2450, Transparent=3000, Overlay=4000）。决定绘制顺序。\n- `RenderType`：用于 shader replacement（如 `Transparent`、`Opaque`、`Cutout`），后处理/场景视图分类。\n- `IgnoreProjector`：是否受 Projector 影响。\n- `DisableBatching`：禁用合批（顶点位移类 shader 需要）。\n- `CanUseSpriteAtlas`、`PreviewType`。\n\n**Pass Tags**：\n- `LightMode`：该 Pass 在哪个渲染阶段执行（`ForwardBase`、`ForwardAdd`、`ShadowCaster`、`DepthOnly`、`UniversalForward`）。\n- `PassFlags`、`RequireOptions`。\n\n要点：Queue 排序错了会出现透明穿插、地面被天空盖住等典型 bug。",
+    "tags": [
+      "Tags",
+      "Queue",
+      "LightMode"
+    ]
+  },
+  {
+    "id": "shader-004",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "渲染排序是怎么回事？UE5 里透明物体为什么排在不透明之后？透明材质有哪些坑？",
+    "answer": "**UE5 默认渲染顺序**：\n1. Depth Prepass（Z-Prepass，可选）\n2. Base Pass（G-Buffer for Deferred / 直接着色 for Forward）\n3. Lighting（Deferred 才有）\n4. **Transparent 物体** —— 按距离排序，从后往前\n5. Post Processing\n6. UI（UMG）\n\n**为什么透明排在不透明之后**：\n- 不透明物体写深度，用 Early-Z 剔除被遮挡像素\n- 透明物体需要 Blend，必须看到背后内容\n- 透明物体 **不能写深度**（否则 Blend 失效），只能读深度做测试\n\n**UE5 透明材质的坑**：\n\n**1. 排序问题**：UE5 按像素到相机距离排序，复杂重叠时穿帮。解决：用 Separate Translucency（半透明分离渲染）\n\n**2. 性能开销**：透明不走 Early-Z，每盏灯都要重新计算光照\n\n**3. Blend Mode 选择**：\n| Blend Mode | 用途 | 排序 |\n| Opaque | 不透明 | Base Pass |\n| Masked | 1-bit 透明（树叶） | Base Pass + clip() |\n| Translucent | 半透明（玻璃/水） | Transparent Pass |\n| Additive | 加法（特效） | Transparent Pass |\n\n**4. Masked vs Translucent**：能用 Masked 就别用 Translucent（Masked 写深度，可参与 Early-Z）\n\n**5. 移动端**：UE5 移动端默认 Forward，透明更贵。用 AlphaToCoverage 替代 Masked，限制同屏透明物体数量\n\n**面试加分点**：Separate Translucency 把半透明分离到独立 RT，排序更准但多一次拷贝；Render After DoF 让透明物体参与景深。",
+    "tags": [
+      "渲染排序",
+      "透明",
+      "BlendMode",
+      "Translucent"
+    ]
+  },
+  {
+    "id": "shader-005",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "ZWrite 和 ZTest 的默认值是什么？为什么透明物体要 ZWrite Off？",
+    "answer": "默认：`ZTest LEqual`（小于等于深度缓冲值才绘制）、`ZWrite On`（写入深度）。\n\n透明物体 ZWrite Off 的原因：\n- 透明混合需要看到后面的物体。如果透明物体写深度，后面更远的透明片元会被深度测试丢弃，导致背后的透明层消失。\n- 例：玻璃后面有水，玻璃写深度后水被剔除，玻璃就不透明了。\n\n典型透明 Pass 配置：\n```\nZWrite Off\nBlend SrcAlpha OneMinusSrcAlpha\n```\n\nAlphaTest（Cutout）例外：它的片元要么完全画要么不画（clip），可以 ZWrite On，享受 Early-Z 优化。树叶、栅栏用 AlphaTest 性能更好。",
+    "tags": [
+      "ZWrite",
+      "ZTest",
+      "深度"
+    ]
+  },
+  {
+    "id": "shader-006",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "解释 Blend 混合模式。SrcAlpha OneMinusSrcAlpha 和 One One（Additive）的区别和适用场景？",
+    "answer": "Blend 公式：`最终色 = SrcFactor * 源色 + DstFactor * 目标色`。\n\n- **SrcAlpha OneMinusSrcAlpha**（传统 Alpha 混合）：`out = src.a*src + (1-src.a)*dst`。半透明叠加，能透过背景。用于玻璃、半透明 UI、烟雾。\n- **One One**（Additive 加法）：`out = src + dst`。越叠越亮，黑色不影响。用于火焰、能量光、爆炸、发光粒子。\n- **One OneMinusSrcAlpha**（Premultiplied Alpha）：预乘 alpha 工作流，UI 合批友好。\n\n注意：\n- Additive 不会变暗，但高密度区域会过曝发白。\n- Alpha 混合需要排序，Additive 不需要排序（交换律成立）。\n- Additive 更省带宽（无需读回排序），但 overdraw 严重时同样费。\n- 移动端能用 Additive 就用，能用 AlphaTest 就不用 AlphaBlend。",
+    "tags": [
+      "Blend",
+      "混合模式",
+      "Additive"
+    ]
+  },
+  {
+    "id": "shader-007",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "Cull 剔除模式有哪些？什么时候需要 Cull Front 或 Cull Off？",
+    "answer": "- `Cull Back`（默认）：剔除背向相机的面，只画正面。性能最优。\n- `Cull Front`：剔除正面，画背面。用于：双面物体只画背面（如内侧壳体）、描边法线外扩。\n- `Cull Off`：双面都画。用于：薄面片（布料、叶子、UI）、需要看到内侧的物体。\n\n注意：Cull Off 会让片元数翻倍（背向面也画），移动端慎用。\n\n描边 Shader 经典套路：\n```\nCull Front   // 只画背面\nvertex: pos += normal * _OutlineWidth;\nfragment: return _OutlineColor;\n```\n利用背面外扩形成轮廓，比后处理描边便宜。",
+    "tags": [
+      "Cull",
+      "剔除",
+      "描边"
+    ]
+  },
+  {
+    "id": "shader-008",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "SubShader 的 Fallback 机制和多个 SubShader 的选择规则是怎样的？",
+    "answer": "UE5 选择 SubShader 的规则：**从上到下，选第一个能在当前 GPU 上编译运行的**。\n\n判定依据：\n- SubShader 内的 `LOD` 值（可被 QualitySettings 的 shader LOD 上限截断）。\n- GPU 是否支持该 SubShader 用到的特性（如 SM 版本、特定扩展）。\n\n用途：**降级方案**。\n```\nSubShader { LOD 600 ... 高配 PBR }\nSubShader { LOD 300 ... 简化光照 }\nSubShader { LOD 100 ... 纯色 unlit }\nFallback \"Mobile/Diffuse\"\n```\n\n通过 `Shader.globalMaximumLOD` 或 QualitySettings 控制高/低配机器走哪个 SubShader，实现自动降级。\n\nFallback 是最后兜底：所有 SubShader 都不支持时，用另一个现成 shader 顶上，避免黑屏。",
+    "tags": [
+      "SubShader",
+      "Fallback",
+      "LOD"
+    ]
+  },
+  {
+    "id": "shader-009",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "Shader LOD 是什么？如何用它做画质分级？",
+    "answer": "Shader LOD 是 SubShader 的一个数值标签，引擎只编译 LOD 值 ≤ 全局上限的 SubShader。\n\n配置：\n```\n// shader 内\nSubShader { LOD 600 ... }\nSubShader { LOD 200 ... }\n\n// C# 控制\nShader.globalMaximumLOD = 600;  // 高配用 600 那个\nShader.globalMaximumLOD = 200;  // 低配用 200 那个\n```\n\n或通过 QualitySettings 关联不同 LOD。\n\n实战：\n- 高配机：完整 PBR + 多光源 + 阴影（LOD 600）。\n- 中配：简化 PBR + 主光源（LOD 300）。\n- 低配：Unlit + 顶点色（LOD 100）。\n\n注意：和 mesh LOD 是两回事。Mesh LOD 减面，Shader LOD 减特效/光照复杂度。两者常配合使用。",
+    "tags": [
+      "LOD",
+      "降级",
+      "画质分级"
+    ]
+  },
+  {
+    "id": "shader-010",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 里一个材质 Pass 意味着什么？多 Pass 材质的代价和优化？",
+    "answer": "**UE5 的 Pass 概念**：UE5 不像 Unity 有手写多 Pass Shader。材质系统由引擎自动管理 Pass：\n\n| Pass | 作用 | 材质参与 |\n|------|------|---------|\n| Depth Prepass | 写深度，减 Overdraw | Opaque（可选） |\n| Base Pass | 写 G-Buffer（Deferred）或直接着色（Forward） | Opaque / Masked |\n| Velocity | 写运动向量（TAA/MotionBlur） | 移动物体 |\n| Custom Depth | 自定义深度（描边/后处理选取） | 手动开启 |\n| Translucency | 透明渲染 | Translucent |\n| Shadow Depth | 阴影深度图 | 投影物体 |\n| Post Process | 后处理 | Post Process Material |\n\n**何时触发多 Pass（多 draw call）**：\n1. Custom Depth 开启 → +1 次 Pre Pass\n2. 双面材质 → 可能分两次画正反面\n3. 分离半透明 → 透明分两次\n4. 阴影投射 → 每个 CSM 级联画一次阴影深度\n5. Post Process Material → 全屏一次\n\n**优化策略**：\n1. 按需开启 Custom Depth，渲染后关\n2. 阴影优化：Shadow Bounding（限制投影距离），远处物体不投阴影\n3. LOD 配合阴影：远 LOD 不投阴影\n4. Instancing：同类物体合并\n5. Static Mesh 合并：Merge Actors 工具\n6. Mobile：减少动态阴影，用 Baked Shadow\n\n**和 Unity 多 Pass 的对比**：Unity 手写 Pass 块，灵活但易失控；UE5 引擎自动管理，TA 通过开关控制。\n\n**面试加分点**：stat scenerendering 看 DrawCalls 数；Mobile HDR 多一个 Pass 谨慎用；Forward+/Deferred 切换影响 Pass 数量。",
+    "tags": [
+      "Pass",
+      "DrawCall",
+      "CustomDepth",
+      "阴影"
+    ]
+  },
+  {
+    "id": "shader-011",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "顶点着色器和片元着色器的职责分别是什么？",
+    "answer": "**顶点着色器（VS）**：每顶点执行一次。\n- 把顶点从模型空间变换到裁剪空间（MVP）。\n- 传递数据给片元（UV、法线、颜色等）。\n- 可做顶点动画（波浪、风、位移）。\n\n**片元着色器（FS）**：每像素（片元）执行一次。\n- 计算最终颜色（光照、纹理采样、特效）。\n- 输出到 SV_Target。\n\n性能关系：顶点数 << 像素数，所以能挪到顶点做的就别放片元。例如：\n- 顶点光照（Gouraud）比片元光照（Phong）便宜，但精度低。\n- 顶点雾 vs 片元雾。\n\n插值：VS 输出经过光栅化线性插值后传给 FS，所以法线等需归一化的量要在 FS 里重新 normalize。",
+    "tags": [
+      "顶点着色器",
+      "片元着色器",
+      "管线"
+    ]
+  },
+  {
+    "id": "shader-012",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "解释常见语义：POSITION、NORMAL、TEXCOORD0、SV_POSITION、SV_TARGET。",
+    "answer": "语义告诉编译器数据对应哪个寄存器/输入槽。\n\n**顶点输入**（来自 mesh）：\n- `POSITION`：模型空间顶点坐标 float3/float4。\n- `NORMAL`：法线 float3。\n- `TANGENT`：切线 float4（w 分量存手性）。\n- `TEXCOORD0`~`TEXCOORD7`：UV 坐标。\n- `COLOR`：顶点色。\n\n**顶点输出 / 片元输入**（插值器 Varying）：\n- `SV_POSITION`：裁剪空间坐标（必须，GPU 用它做光栅化/深度）。\n- `TEXCOORDn`：自定义插值数据。\n- `COLOR`：插值颜色。\n\n**片元输出**：\n- `SV_TARGET`：渲染目标颜色。\n- `SV_DEPTH`：手动写深度（少见，慎用，会关 Early-Z）。\n\n注意：SV_POSITION 在片元着色器里读取时，xy 是像素坐标，z 是深度，w 是齐次坐标倒数——不要当位置用。",
+    "tags": [
+      "语义",
+      "POSITION",
+      "SV_POSITION"
+    ]
+  },
+  {
+    "id": "shader-013",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "法线从模型空间变换到世界空间时，为什么有时要用法线矩阵的逆转置？UE5 里怎么处理？",
+    "answer": "**数学原理**：法线变换用逆转置矩阵（Inverse Transpose）的原因：\n\n- 切线 T 和法线 N 垂直：T · N = 0\n- 变换后切线 T' = M · T\n- 要保持 T' · N' = 0，推导得 **N' = (M^(-1))^T · N**（逆转置）\n\n**均匀缩放时**：逆转置 = (1/s) · M，方向一致，可以直接用 M 变换法线（最后归一化）。\n\n**非均匀缩放时**：必须用逆转置，否则法线方向错误，光照计算出错。\n\n**UE5 里的处理**：\n\n**1. Transform 节点**：\n- `Transform` 节点在空间之间变换向量\n- 引擎自动用逆转置矩阵，美术不用操心\n- 配置 Source / Destination 空间（Local→World / Tangent→World）\n\n**2. 法线贴图采样**：\n- TextureSample → Normal 类型 → 自动从切线空间\n- 接 Normal 引脚 → 引擎自动 Transform 到世界空间\n\n**3. 手动变换（Custom node）**：\n```hlsl\nfloat3 worldNormal = mul((float3x3)WorldToTangentInverse, tangentNormal);\n```\n\n**和 Unity 的区别**：Unity 需手动 mul(unity_WorldToObject, float4(N,0)) 或用 UnityObjectToWorldNormal() 宏；UE5 用节点图，引擎自动处理。\n\n**面试加分点**：非均匀缩放是法线错误的常见原因；World Space Normal vs Tangent Space Normal；双面材质时要处理法线翻转。",
+    "tags": [
+      "法线",
+      "矩阵",
+      "逆转置",
+      "Transform"
+    ]
+  },
+  {
+    "id": "shader-014",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "为什么移动端 Shader 多用 half 而非 float？什么时候必须用 float？",
+    "answer": "移动 GPU（尤其 Mali/Adreno）对 half 优化显著：\n- half 寄存器占用少，ALU 吞吐翻倍。\n- 带宽减半（纹理/缓冲）。\n- 部分架构 half 是原生，float 要拆两次。\n\n移动端规则：\n- 颜色、UV、法线、光照计算 → `half`。\n- 顶点位置变换的 MVP → 仍可 half（精度够）。\n\n**必须用 float** 的场景：\n- 世界空间坐标参与大范围计算（地形、大世界坐标累加），half 的 ±65504 范围会溢出。\n- 时间累积、sin 的长周期相位。\n- 深度重建、阴影 bias 精度敏感处。\n- 某些噪声函数（fbm 多次累加）。\n\nfixed（11 位）：现代移动 GPU 基本不支持，会自动升 half，所以不再推荐用 fixed。\n\n检查手段：编译报告看寄存器数，or 用 Mali Offline Compiler 看指令周期。",
+    "tags": [
+      "half",
+      "float",
+      "移动端",
+      "精度"
+    ]
+  },
+  {
+    "id": "shader-015",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "顶点光照（Gouraud）和片元光照（Phong）的区别？什么时候用顶点光照？",
+    "answer": "**顶点光照**：在顶点着色器算光照颜色，结果经光栅化线性插值到片元。\n- 优点：每个顶点算一次，极快。\n- 缺点：高光会丢失（线性插值破坏 specular 的高频变化），三角形内部光照错误。\n\n**片元光照**：在片元着色器用插值后的法线算光照。\n- 优点：高光锐利、正确。\n- 缺点：每像素算，贵。\n\n顶点光照适用：\n- 低多边形物体且只需漫反射（如远距离 LOD、移动端角色）。\n- 顶点数密集到法线变化平缓（高度场、地形细节）。\n- 没有高光或高光很弱（卡通漫反射）。\n\n不适用：高光强烈的金属、水面、近距离观察的物体——会出现明显的三角形色块。",
+    "tags": [
+      "Gouraud",
+      "Phong",
+      "顶点光照"
+    ]
+  },
+  {
+    "id": "shader-016",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "SV_POSITION 和 POSITION 的区别？片元着色器里的 SV_POSITION 含义？",
+    "answer": "**POSITION**：顶点着色器的**输入**语义，表示模型空间顶点坐标，从 mesh 顶点数据来。\n\n**SV_POSITION**：顶点着色器的**输出**语义，表示裁剪空间齐次坐标（`mul(UNITY_MATRIX_MVP, pos)`），GPU 用它做光栅化和深度写入。\n\n两者关系：VS 接收 POSITION，变换后输出 SV_POSITION。\n\n片元着色器里的 SV_POSITION：\n- 如果声明输入 `float4 pos : SV_POSITION`，GPU 自动填充：\n  - `xy` = 像素坐标（左上原点，单位像素）\n  - `z` = 深度值 [0,1]\n  - `w` = 1/w（齐次坐标倒数，用于透视校正插值）\n- 不能当世界坐标用。\n\n用途：屏幕空间效果（dither、屏幕 UV 从像素坐标算）、重建深度、screen-space dithering。",
+    "tags": [
+      "SV_POSITION",
+      "语义",
+      "裁剪空间"
+    ]
+  },
+  {
+    "id": "shader-017",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "MVP 矩阵变换的完整过程？UE5 里相关的内置矩阵/节点有哪些？",
+    "answer": "**MVP 变换全过程**：Model → View → Projection → Clip → NDC → Screen\n\n1. **Model Matrix（M）**：Local → World Space。UE5：LocalToWorld / WorldToLocal\n2. **View Matrix（V）**：World → Camera Space。UE5：WorldToView / ViewToWorld\n3. **Projection Matrix（P）**：Camera → Clip Space。UE5：ViewToClip / ClipToView\n4. **透视除法**：Clip → NDC（xyz / w），UE5 用 DirectX 风格 [0, 1]\n5. **Viewport 变换**：NDC → Screen Space\n\n**UE5 Material Editor 相关节点**：\n\n| 节点 | 作用 | 对应矩阵 |\n|------|------|---------|\n| Local Position | 模型空间顶点 | — |\n| World Position | 世界空间顶点 | M · LocalPos |\n| Transform | 空间变换 | 任意矩阵 |\n| Camera Position WS | 相机世界坐标 | View 原点 |\n| View Direction | 相机方向 | 相机前向 |\n| Screen Position | 屏幕坐标 | VP · P · V · M |\n| Scene Depth | 场景深度 | 屏幕空间采样 |\n\n**Custom node 里可用的内置变量**：\n```hlsl\nView.ViewToClip        // 投影矩阵\nView.WorldToView       // 视图矩阵\nView.WorldToClip       // VP 矩阵\nResolvedView.WorldCameraOrigin  // 相机原点\nPrimitive.LocalToWorld // 模型矩阵（per-draw）\n```\n\n**和 Unity 内置矩阵的对应**：\n| Unity | UE5 |\n| unity_ObjectToWorld | Primitive.LocalToWorld |\n| unity_WorldToObject | Primitive.WorldToLocal |\n| unity_MatrixV | View.WorldToView |\n| unity_MatrixVP | View.WorldToClip |\n| _WorldSpaceCameraPos | ResolvedView.WorldCameraOrigin |\n\n**面试加分点**：ResolvedView 含 TAA jitter，View 不含，做屏幕空间效果时要注意；UE5 默认 Reverse-Z（near=1, far=0），精度更高，采样深度时要注意。",
+    "tags": [
+      "MVP",
+      "矩阵",
+      "Transform",
+      "空间变换"
+    ]
+  },
+  {
+    "id": "shader-018",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "插值器（Varying）精度和数量有限制吗？如何优化？",
+    "answer": "有限制，且不同 API 不同：\n- OpenGL ES 2.0 / SM2.0：最少 8 个 varying（4 向量）。\n- OpenGL ES 3.0 / SM3.0：最少 15 个。\n- 现代 SM5.0 / Vulkan：32+，基本够用。\n\n超出限制会导致编译失败或 fallback 到更慢路径。\n\n优化技巧：\n- **打包**：把多个 float 塞进一个 float4。例：`float4(normal.xy, tangent.xy)`，片元里重建。\n- 复用：世界坐标和裁剪坐标不要都传，能用 SV_POSITION 推算就别另传。\n- 顶点色和 UV2 共用一个通道（如果不同时用）。\n\n移动端尤其要省：每个 varying 都占带宽，三角形越多越费。8 个 varying 比 4 个慢一倍不是夸张。",
+    "tags": [
+      "插值器",
+      "Varying",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-019",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 的渲染管线架构是怎样的？Forward+ 和 Deferred 的区别？各适合什么场景？",
+    "answer": "**UE5 渲染管线架构**：\n\n**1. Deferred Shading（延迟着色，默认）**：\n- Base Pass 写 G-Buffer（Albedo/Normal/Roughness/Metallic/AO）\n- Lighting Pass 读 G-Buffer 计算光照\n- 优势：光照成本与像素数无关，多光源友好\n- 劣势：G-Buffer 带宽大（移动端贵）；透明物体走 Forward；MSAA 支持差\n- UE5 PC/主机默认 Deferred\n\n**2. Forward Shading（前向着色）**：\n- 每个 pixel 直接计算所有光照\n- 优势：支持 MSAA；带宽友好；透明友好\n- 劣势：多光源成本高\n- 移动端默认 Forward\n\n**3. Forward+（分簇前向）**：\n- 屏幕分簇（Cluster），每簇记录光源列表\n- Pixel Shader 只计算所属簇的光源\n- 兼具 Forward 的 MSAA 优势和 Deferred 的多光源能力\n- UE5 5.1+ 支持\n\n**核心模块**：\n- **RDG（Render Dependency Graph）**：现代渲染核心，自动管理 RT 生命周期、Pass 依赖\n- **Mesh Draw Pipeline**：自动 Instancing、合批、可见性剔除\n- **Lumen**：实时 GI（Surface Cache + Screen Space GI + Voxel Tracing），PC/主机可用\n- **Nanite**：虚拟几何体，自动 LOD + 像素级可见性，无传统 LOD pop-in\n\n**Shading Path 选择**：\n| 场景 | 推荐 | 原因 |\n| PC 3A | Deferred + Lumen + Nanite | 视觉最佳 |\n| 移动端中高端 | Forward + 烘焙 GI | 性能敏感 |\n| 移动端旗舰 | Forward+ | 平衡 |\n| VR | Forward | MSAA + 低延迟 |\n\n**和 Unity SRP 的对比**：\n| Unity | UE5 |\n| URP（移动友好） | Forward / Forward+ |\n| HDRP（PC/主机） | Deferred + Lumen |\n| SRP Batcher | Mesh Draw Pipeline（自动） |\n| Renderer Feature | Post Process Material / RDG Pass |\n\n**面试加分点**：Lumen Surface Cache 把场景表面光照缓存到 voxel；Nanite 把网格分成 128 三角形的簇；TSR（Temporal Super Resolution）是 UE5 自研 TAA 上采样。",
+    "tags": [
+      "渲染管线",
+      "Deferred",
+      "Forward",
+      "Lumen",
+      "Nanite"
+    ]
+  },
+  {
+    "id": "shader-020",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 材质里什么时候用 Custom node 写 HLSL？和纯节点图相比的取舍？",
+    "answer": "**Custom node 的定位**：UE5 Material Editor 的 Custom node 允许直接写 HLSL 代码。用于节点图难以表达或性能敏感的逻辑。\n\n**适合用 Custom node 的场景**：\n\n1. **复杂数学/算法**：噪声函数（Simplex/Voronoi）、光线步进（Ray Marching）、积分计算（球谐光照、IBL 预滤波）\n2. **循环/分支**：UE5 节点图不支持循环，Custom node 可写 for/while\n3. **共享变量/中间状态**：节点图是无状态数据流，Custom node 可用局部变量\n4. **移植外部 Shader**：从 ShaderToy/论文/其他引擎移植\n\n**节点图 vs Custom node 取舍**：\n\n| 维度 | 纯节点图 | Custom node |\n| 美术友好 | 可视化 | 要会代码 |\n| 维护性 | 节点多了乱 | 代码可注释 |\n| 性能 | 引擎优化好 | 需手动优化 |\n| 循环/分支 | 不支持 | 支持 |\n| 版本控制 | 二进制 diff 困难 | 代码可 diff |\n\n**性能注意**：\n- Custom node 不会被节点图的优化器处理，需手写优化\n- 避免在 Custom node 里采样纹理（用 TextureSample 节点传入更高效）\n- 移动端：Custom node 走 HLSL → GLSL/ESSL 转换，注意兼容性\n\n**最佳实践**：\n1. 简单逻辑用节点图\n2. 复用逻辑封装成 Material Function\n3. 复杂算法用 Custom node\n4. 性能关键路径手写 HLSL\n5. 输入用引脚，输出用 return\n\n**和 Unity HLSLPROGRAM 的区别**：Unity 在 ShaderLab 里写 HLSLPROGRAM...ENDHLSL，是完整 Shader 文件；UE5 的 Custom node 是材质图里的一个节点，和节点图混用。UE5 也可写完整 .usf Shader 文件（C++ 层）。\n\n**面试加分点**：Material Editor 生成的 HLSL 可在 Window > Shader Code > HLSL Code 查看；Shared: Yes 选项让多个 Custom node 共享代码；r.MaterialEnableNewHLSLGenerator=1 启用新 HLSL 生成器。",
+    "tags": [
+      "CustomNode",
+      "HLSL",
+      "MaterialEditor",
+      "性能"
+    ]
+  },
+  {
+    "id": "shader-021",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 的材质函数库（Material Functions）提供哪些常用功能？如何创建和使用？",
+    "answer": "**UE5 Material Functions 体系**：可复用节点组，类似 Unity SubGraph，但更原生。\n\n**引擎内置 MF（常用）**：\n- **数学类**：MF_SphereMask、MF_VoronoiNoise、MF_PerlinNoise、MF_SmoothStep\n- **坐标类**：MF_WorldPosition、MF_ScreenPosition、MF_Triplanar（三平面映射）\n- **光照类**：MF_SphericalHarmonic、MF_ReflectionVectorWS\n- **实用类**：MF_Time、MF_Fresnel、MF_DepthFade、MF_CameraDepthFade\n- **PBR 类**：MF_NormalFromHeight、MF_RoughnessRemap\n\n**创建 Material Function**：\n1. Content Browser > Right Click > Material > Material Function\n2. 打开 Function Editor\n3. 添加 Input 节点（函数输入参数）\n4. 添加 Output 节点（函数返回值）\n5. 中间用节点连接逻辑，保存\n\n**使用方式**：在 Material Editor 右键 > Material Function > 选择，或拖拽 MF 资产到材质图\n\n**MF 的优势**：\n1. 跨材质复用：写一次，多个材质用\n2. 统一维护：改一处，所有引用材质自动更新\n3. 版本控制友好：独立 .uasset 可单独 diff\n4. 编译时内联展开，不增加运行时开销\n\n**和 Unity SubGraph 的对比**：\n| Unity SubGraph | UE5 Material Function |\n| 黑盒，输入输出固定 | Input/Output 节点声明 |\n| Property 传参 | Input 引脚传参 |\n| 嵌套有限制 | 可无限嵌套（不能递归） |\n| 内联展开 | 内联展开（同） |\n\n**面试加分点**：Expose to Library 选项勾选后该 MF 出现在所有材质的右键菜单；Make Material Function 节点可在材质图里直接创建临时 MF；r.MaterialEnableNewHLSLGenerator=1 启用新 HLSL 生成器，MF 更高效。",
+    "tags": [
+      "MaterialFunction",
+      "复用",
+      "节点库"
+    ]
+  },
+  {
+    "id": "shader-022",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 材质里如何获取主光源和附加光？光照计算的节点有哪些？",
+    "answer": "**UE5 材质光照获取方式**：大部分光照是自动计算的（由 Shading Model 决定），也可手动获取。\n\n**1. 自动光照（默认）**：把数据接到 Main Material Node 的 Base Color / Metallic / Roughness / Normal，引擎自动算光照\n\n**2. 手动获取光照节点**：\n- DirectionalLightColor / DirectionalLightDirection / DirectionalLightIntensity：主光源\n- LightVector / LightColor / LightAttenuation：当前光源（Forward 模式）\n- SkyLightColor：天光颜色\n- DiffuseIndirectLighting / SpecularIndirectLighting：间接光\n- AmbientOcclusion：AO\n\n**3. 间接光来源**：\n- Lightmass：烘焙 GI\n- Lumen：实时 GI（Surface Cache + 屏幕空间追踪）\n- Sky Light：采样 HDRI Cubemap\n\n**4. Reflection Capture 体系**：\n- Sphere Reflection Capture：球形捕获，室内\n- Box Reflection Capture：盒形捕获，走廊/房间\n- 烘焙时捕获周围场景到 Cubemap，运行时按反射向量采样\n\n**和 Unity URP GetMainLight() 的对比**：\n```hlsl\n// Unity: Light mainLight = GetMainLight();\n// UE5 节点: DirectionalLightDirection → lightDir, DirectionalLightColor → lightColor\n// UE5 HLSL: float3 lightDir = ResolvedView.DirectionalLightDirection;\n```\n\n**Shading Model 对光照的影响**：\n| Shading Model | 光照处理 |\n| Unlit | 无光照（纯自发光） |\n| Default Lit | 标准 PBR |\n| Subsurface | 次表面散射 |\n| Hair | 头发各向异性 |\n| ClearCoat | 双层（汽车漆） |\n\n**移动端光照限制**：Mobile Forward 默认只支持 4 盏动态光，r.Mobile.MaxDynamicPointLights 控制\n\n**面试加分点**：Lumen Surface Cache 把场景表面光照缓存到 voxel；Rect Light / Light Function 是 UE5 特有光源类型；Forward 模式 IBL 用简化 SH，质量低于 Deferred。",
+    "tags": [
+      "光照",
+      "DirectionalLight",
+      "LightVector",
+      "PBR"
+    ]
+  },
+  {
+    "id": "shader-023",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的 Post Process Material 怎么用？做描边或自定义后处理的流程？",
+    "answer": "**Post Process Material 体系**：全屏材质，类似 Unity Renderer Feature / Full Screen Pass。\n\n**创建流程**：\n1. Content Browser > Material > 命名\n2. Material Editor > Details：Material Domain = Post Process；Blendable Location = Before/After Tonemapping\n3. 把效果输出到 Emissive Color 引脚\n4. 创建 Post Process Volume，把材质加到 Weighted Blends 数组\n\n**描边效果实现（基于 Custom Depth）**：\n```\n1. SceneTexture: CustomDepth → 采样当前像素的 Custom Depth\n2. SceneTexture: SceneDepth → 场景深度\n3. 如果 CustomDepth > 0（物体开启了 Custom Depth）：\n   - 对周边像素采样 CustomDepth，检测边缘\n   - 边缘像素染成描边色\n4. 混合到 Emissive Color\n```\n\n**法线描边（Sobel）**：从 GBufferA 解码世界法线，对 3x3 邻域做 Sobel 算子，梯度大处=边缘\n\n**SceneTexture 可用通道**：\n| 通道 | 内容 |\n| PostProcessInput0 | 原始场景色 |\n| SceneDepth | 场景深度 |\n| CustomDepth | 自定义深度（需物体开启） |\n| CustomStencil | 自定义模板值 |\n| GBufferA | 世界法线 |\n| GBufferB | 颜色 + AO |\n| GBufferC | 金属/粗糙度 |\n| Velocity | 运动向量 |\n\n**Blendable Location 选择**：\n| 位置 | 时机 | 用途 |\n| Before Tonemapping | HDR 阶段 | 线性空间操作（描边/扭曲） |\n| After Tonemapping | LDR 阶段 | 最终色调调整 |\n| Replacing Tonemapping | 替换 ACES | 自定义色调映射 |\n\n**性能注意**：Post Process Material 是全屏 Pass，移动端慎用；每个全屏 Pass = 分辨率 × 像素复杂度；多个 PPM 会叠加，控制数量（< 3 个）\n\n**和 Unity Renderer Feature 的对比**：\n| Unity URP | UE5 |\n| Renderer Feature + Full Screen Pass | Post Process Material |\n| ScriptableRenderPass（C++） | RDG Pass（C++ 插件） |\n| Blit（拷贝 RT） | SceneTexture 采样 |\n\n**更底层的扩展**：如果 PPM 不够用，可写 C++ 插件，用 RDG（Render Dependency Graph）自定义 Pass\n\n**面试加分点**：Custom Stencil 配合 Custom Depth 可做选区隔离描边；stat gpu 看每个 PPM 的耗时；移动端 PPM 受限，建议用材质替代方案。",
+    "tags": [
+      "PostProcess",
+      "描边",
+      "CustomDepth",
+      "后处理"
+    ]
+  },
+  {
+    "id": "shader-024",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 项目从 Forward 迁移到 Deferred（或反向）要注意什么？材质需要改吗？",
+    "answer": "**Forward ↔ Deferred 迁移要点**：UE5 的 Shading Path 切换在 Project Settings > Engine > Rendering > Shading Path\n\n**Deferred → Forward 迁移**：\n\n1. **光照变化**：Deferred 多光源友好；Forward 每光每像素算，多光源成本飙升。移动端 Forward 限制动态光源数（默认 4 盏）\n2. **G-Buffer 特性丢失**：Deferred 的 G-Buffer 支持 PPM 读取法线/粗糙度；Forward 无 G-Buffer，PPM 只能读颜色和深度。描边方案改用 Custom Depth + 颜色差异检测\n3. **Shading Model 受限**：Forward 部分受限（移动端只支持 Default Lit / Subsurface）\n4. **MSAA 可用**：Deferred 不支持 MSAA（用 TAA）；Forward 支持 MSAA\n5. **Lumen / Nanite 兼容性**：Lumen 只在 Deferred 完整可用；Nanite 在 Forward 下性能下降\n\n**Forward → Deferred 迁移**：\n1. **带宽增加**：G-Buffer 多个 RT，移动端带宽敏感\n2. **光照质量提升**：多光源不再逐像素逐光计算\n3. **TAA 必须**：Deferred 无 MSAA，依赖 TAA\n\n**材质是否需要改**：\n\n**大部分材质不用改**：UE5 材质是数据驱动的，Shading Path 切换不影响材质资产。引擎自动为不同 Path 生成对应 Shader。\n\n**需要调整的情况**：\n1. 手写 Custom node 读 G-Buffer 的材质 → Forward 下 G-Buffer 不存在\n2. Post Process Material 读 GBufferA-E → Forward 下不可用\n3. Shading Model 不兼容（移动端 Forward 不支持 Hair）\n4. WPO 极端值 → Deferred 的 G-Buffer 精度有限\n\n**和 Unity 管线迁移的对比**：Unity 内置管线 ↔ URP ↔ HDRP 迁移要改 Shader（ShaderLab 语法不同）；UE5 材质统一，Path 切换材质基本不动，迁移成本低\n\n**面试加分点**：Mobile Preview 测试 Forward 表现；r.MobileHDR 控制移动端 HDR；Forward+ 是移动端未来方向。",
+    "tags": [
+      "Forward",
+      "Deferred",
+      "迁移",
+      "ShadingPath"
+    ]
+  },
+  {
+    "id": "shader-025",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的 PBR 材质模型有哪些？Mask Map（遮罩图）是什么？各 Shading Model 怎么用？",
+    "answer": "**UE5 PBR 材质模型**：UE5 用金属度-粗糙度工作流，提供多种 Shading Model：\n\n1. **Default Lit**：标准 PBR，最常用。输入：Base Color / Metallic / Specular / Roughness / Normal / Emissive\n2. **Subsurface**：皮肤/蜡/玉石。额外输入：Subsurface Color / Opacity\n3. **Hair**：各向异性高光，多层高光模拟头发丝\n4. **Cloth**：绒毛高光（Sheen），模拟织物天鹅绒感\n5. **Eye**：角膜反射 + 虹膜折射\n6. **ClearCoat**：双层材质（底层 + 清漆层），汽车漆/钢琴烤漆\n\n**Mask Map 是什么**：通道打包贴图，把多个单通道蒙版合成到 RGBA 四通道，节省纹理采样和内存。\n\n**常见 Mask Map 打包**：\n| 通道 | 内容 |\n| R | Metallic |\n| G | Roughness |\n| B | AO |\n| A | Cavity / Detail |\n\n**在材质里使用 Mask Map**：\n```\n1. TextureSample（Mask Map，sRGB = OFF）\n2. 拆通道：R → Metallic，G → Roughness（注意可能是 Smoothness，需 1-x），B → AO，A → Detail Mask\n3. 接到对应引脚\n```\n\n**Per-Pixel Shading Model**：在材质里用 Shading Model 输出引脚（整数），每像素可不同 Shading Model（如角色身体 Default，脸 Subsurface）。需要材质设置 Use Shading Model from Material\n\n**性能注意**：Subsurface/Hair/Cloth 比 Default Lit 贵；ClearCoat 是双 Pass，成本翻倍；移动端只支持 Default Lit + 简化 Subsurface\n\n**和 Unity HDRP Mask Map 的对比**：Unity HDRP 的 Mask Map：R=Metallic, G=AO, B=Detail Mask, A=Smoothness；UE5 无强制格式但社区约定 R=Metallic, G=Roughness, B=AO, A=Cavity。两者思路一致\n\n**面试加分点**：Subsurface Profile 是预设的次表面参数集，可跨材质复用；Detail Map 配合 Mask Map 的 A 通道叠加高频细节。",
+    "tags": [
+      "PBR",
+      "ShadingModel",
+      "MaskMap",
+      "通道打包"
+    ]
+  },
+  {
+    "id": "shader-026",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 材质里的 Shader Pass（如 Depth Only / Shadow / Velocity）是怎么工作的？材质如何控制？",
+    "answer": "**UE5 的 Shader Pass 体系**：UE5 不像 Unity 用 LightMode Tag 标记 Pass，而是由引擎根据材质属性自动生成多个 Shader Pass。\n\n**自动生成的 Pass**：\n| Pass | 触发条件 | 作用 |\n| Base Pass | 所有 Opaque/Masked 物体 | 写 G-Buffer（Deferred）或直接着色（Forward） |\n| Depth Pass (Z-Prepass) | 可选，r.EarlyZPass | 写场景深度，减 Overdraw |\n| Shadow Pass | 投影物体 | 写阴影深度图（CSM/Point/Spot） |\n| Velocity Pass | 移动物体 + TAA/MotionBlur | 写运动向量 |\n| Custom Depth Pass | 手动开启 | 写自定义深度（描边/选取） |\n| Translucency Pass | Translucent 材质 | 透明渲染 |\n| Post Process Pass | Post Process Material | 全屏后处理 |\n\n**材质控制 Pass 的方式**：\n\n1. **Details 面板开关**：Disable Depth Test / Disable Depth Write / Surface ForwardShading\n2. **per-Object 控制**：Mesh Component > Details > Rendering：Render CustomDepth / Custom Depth Stencil Value / Render in Main Pass / Render in Depth Pass / Affect Dynamic Indirect Lighting\n3. **LOD 级别控制**：每个 LOD 可单独设 bCastShadow\n4. **材质属性影响 Pass**：Blend Mode = Translucent → 不写深度，走透明 Pass；Two Sided → 可能分两次画\n\n**和 Unity LightMode Tag 的对比**：Unity 用 Tags { \"LightMode\" = \"UniversalForward\" } 标记 Pass；UE5 无 Tag 概念，材质属性自动决定参与哪些 Pass，美术更友好\n\n**Shadow Pass 细节**：CSM 4 级联，每级一次 draw call/物体；Point/Spot Light Shadow 六面体/单面；Ray Traced Shadow 无 aliasing\n\n**Velocity Pass 细节**：顶点运动向量 = CurrentPos - PrevPos，用于 TAA、Motion Blur。WPO 动画要 bOutputVelocity = true\n\n**性能优化**：远物体关阴影（LOD > 2 关 Cast Shadow）；静态物体关 Velocity；Custom Depth 按需开；r.EarlyZPass = 1（默认开）\n\n**面试加分点**：r.EarlyZPassMode 控制深度预 pass 范围；Mobile Shadow 只支持 Directional Light CSM，点光源用 Baked。",
+    "tags": [
+      "Pass",
+      "Shadow",
+      "Velocity",
+      "CustomDepth"
+    ]
+  },
+  {
+    "id": "shader-027",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "PBR 的核心理论是什么？能量守恒、微表面、菲涅尔各指什么？",
+    "answer": "PBR（基于物理的渲染）三大支柱：\n\n**1. 能量守恒**：反射光能量 ≤ 入射光能量。漫反射 + 镜面反射之和不超过入射。粗糙度越高，高光越散但峰值越低。\n\n**2. 微表面理论**：表面由无数微小镜面组成，粗糙度（Roughness）描述这些微面的朝向混乱度。\n- 粗糙 → 高光散而暗（GGX 分布）。\n- 光滑 → 高光集中而亮。\n- 微面间相互遮挡（几何项 G）和菲涅尔（F）共同决定最终反射。\n\n**3. 菲涅尔（Fresnel）**：掠射角下反射率增大（Schlick 近似）。看水面：正对时透明，斜看时像镜子。\n\nBRDF 公式（Cook-Torrance）：\n`f = kD * Lambert + kS * (DFG / (4·(N·L)·(N·V)))`\n- D：微面法线分布（GGX/Trowbridge-Reitz）\n- F：菲涅尔项（Schlick）\n- G：几何遮蔽（Smith）\n- kD = 1-kS，且金属 kD=0（金属无漫反射）。",
+    "tags": [
+      "PBR",
+      "能量守恒",
+      "微表面",
+      "菲涅尔"
+    ]
+  },
+  {
+    "id": "shader-028",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "金属度-粗糙度工作流 vs 高光-平滑度工作流？为什么 UE5 默认金属度流？",
+    "answer": "**金属度-粗糙度（Metallic-Roughness，UE5 默认）**：\n- 贴图：Albedo + Metallic（灰度）+ Roughness（灰度）\n- 金属 = 1：Albedo 当反射色，无漫反射。\n- 非金属 = 0：Albedo 当漫反射色，反射色固定为绝缘体 F0（~4%）。\n- 优点：贴图少、艺术家直觉、节省带宽。\n- 缺点：金属度二值化严重，过渡区间不自然；无法做特殊 F0（如水、宝石）。\n\n**高光-平滑度（Specular-Smoothness，UE5 旧 Standard）**：\n- 贴图：Albedo + Specular（RGB）+ Smoothness\n- Specular 直接指定 F0 颜色，可表达特殊材质。\n- 缺点：贴图多、易出错（艺术家乱填 F0 违反能量守恒）。\n\nUE5 选金属度流的原因：带宽省（一个灰度图 vs RGB）、不易违反物理、对实时反射友好。",
+    "tags": [
+      "PBR",
+      "金属度",
+      "工作流"
+    ]
+  },
+  {
+    "id": "shader-029",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "BRDF 是什么？Lambert、Cook-Torrance、GGX 之间的关系？",
+    "answer": "BRDF（双向反射分布函数）：描述给定入射方向和出射方向，表面反射多少光的函数 `f(l,v)`，单位 sr⁻¹。\n\n物理 BRDF 须满足：\n- 非负\n- 互易性：`f(l,v) = f(v,l)`\n- 能量守恒：所有方向积分 ≤ 1\n\n**Lambert**：理想漫反射，`f = albedo / π`。最简单但完全不物理（高光缺失）。\n\n**Cook-Torrance**：微面 BRDF 框架 `f = kD·Lambert/π + kS·(D·F·G)/(4·(N·L)·(N·V))`。是框架，D/F/G 项可换。\n\n**GGX**（Trowbridge-Reitz）：D 项的一种实现，高光长尾、过渡自然，是当前主流（UE5 都用）。\n\n关系：Cook-Torrance 是公式框架，GGX 是其中的 D 项实现，Lambert 是漫反射项的近似。现代 PBR = Lambert(漫) + Cook-Torrance(GGX-F-Schlick-G-Smith)。",
+    "tags": [
+      "BRDF",
+      "Cook-Torrance",
+      "GGX",
+      "Lambert"
+    ]
+  },
+  {
+    "id": "shader-030",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "菲涅尔效应在 PBR 中的作用？Schlick 近似公式？",
+    "answer": "菲涅尔：入射角越大（掠射），反射率越高。看水的边缘像镜子就是这个道理。\n\nSchlick 近似（成本低、精度够）：\n```\nF = F0 + (1 - F0) * pow(1 - NdotV, 5)\n```\n- F0：垂直入射时的反射率（法线方向）。非金属约 4%（0.04），金属 = Albedo。\n- NdotV：法线和视线的夹角余弦。\n\nPBR 中的应用：\n1. 直接光高光项的 F：`F_Schlick(F0, NdotH 或 VdotH)`\n2. 环境反射的 F：`F_Schlick(F0, NdotV)`，结合粗糙度做预滤波。\n\n关键点：金属 F0 = 反射色（高，0.5-1.0），非金属 F0 固定低值（0.02-0.05）。这就是为什么金属的边缘反射和中心差异大，而非金属边缘也有明显反射增亮（Fresnel Rim）。",
+    "tags": [
+      "菲涅尔",
+      "Schlick",
+      "PBR"
+    ]
+  },
+  {
+    "id": "shader-031",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "环境光（IBL）在 UE5 PBR 中如何贡献？漫反射积分和高光预滤波怎么实现？",
+    "answer": "**IBL（Image-Based Lighting）在 UE5 的实现**：用环境贴图（Cubemap / SH）为场景提供间接光照，分漫反射和高光两部分。\n\n**1. 漫反射 IBL**：\n- 对半球做余弦加权积分：irradiance = ∫ Li * cos(θ) dω\n- UE5 方案：Lightmass 烘焙（静态场景）/ Lumen 实时 GI / Sky Light 实时 IBL\n\n**2. 高光 IBL**：\n- 基于粗糙度预滤波 Cubemap\n- UE5 用 Reflection Capture（Reflection Probe）预烘焙\n- 运行时按粗糙度混合不同 mip（粗糙度高用低 mip）\n\n**UE5 里的 IBL 节点**：\n| 节点 | 作用 |\n| ReflectionVectorWS | 反射向量（世界空间） |\n| SkyLightColor | 天光颜色 |\n| DiffuseIndirectLighting | 漫反射间接光 |\n| SpecularIndirectLighting | 高光间接光 |\n| AmbientOcclusion | AO（遮挡间接光） |\n\n**Reflection Capture 体系**：\n- Sphere Reflection Capture：球形捕获，室内\n- Box Reflection Capture：盒形捕获，走廊/房间\n- 烘焙时捕获周围场景到 Cubemap，运行时按反射向量采样，按粗糙度混合 mip\n\n**Lumen 实时 IBL（UE5 旗舰）**：\n- 不依赖预烘焙 Reflection Capture\n- Surface Cache 实时捕获场景表面\n- 屏幕空间 GI + Voxel Tracing\n- 质量高于传统 Reflection Capture，但更贵\n- 移动端不支持\n\n**Sky Light（天光）**：采样 HDRI Cubemap，提供全局漫反射 + 高光 IBL。Source Type = SLS_CapturedScene（实时捕获）或 SLS_SpecifiedCubemap（指定 Cubemap）\n\n**和 Unity IBL 的对比**：\n| Unity | UE5 |\n| Reflection Probe | Reflection Capture |\n| Sky Box / HDRI | Sky Light（Cubemap） |\n| SH 间接光 | Lightmass / Lumen |\n\n**面试加分点**：Lumen Surface Cache 把场景表面光照缓存到 voxel；Reflection Capture 权重混合（多个 Capture 重叠时按距离插值）；Forward 模式 IBL 用简化 SH，质量低于 Deferred。",
+    "tags": [
+      "IBL",
+      "PBR",
+      "ReflectionCapture",
+      "Lumen",
+      "SkyLight"
+    ]
+  },
+  {
+    "id": "shader-032",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "为什么金属材质的反射率高、漫反射为 0？",
+    "answer": "金属的物理特性：自由电子云在表面立即吸收并重新辐射入射光，光无法进入内部发生散射，所以**没有漫反射**。\n\n在 PBR 模型中：\n- 金属（Metallic=1）：Albedo 当作反射色（F0），kD（漫反射系数）= 0，kS = 1。\n- 非金属（Metallic=0）：Albedo 当作漫反射色，F0 固定为绝缘体反射率（~4%），kD = 1-kS。\n\n所以金属看起来：\n- 反射强（F0 高，0.5-1.0）。\n- 颜色来自反射（金 = 黄反射，铜 = 橙反射）。\n- 无环境漫反射贡献。\n\n常见金属 F0：\n- 铁：(0.56, 0.57, 0.58)\n- 金：(1.0, 0.71, 0.29)\n- 铜：(0.95, 0.64, 0.54)\n- 铝：(0.91, 0.92, 0.92)\n\n美术常错：把金属度设成 0.5 想 \"半金属\"，物理上不存在，会得到非物理的高光颜色。",
+    "tags": [
+      "PBR",
+      "金属",
+      "反射率"
+    ]
+  },
+  {
+    "id": "shader-033",
+    "category": "shader",
+    "difficulty": "初级",
+    "question": "Albedo、Normal、Metallic、Roughness、AO、Emission 各自的作用？",
+    "answer": "- **Albedo（反照率）**：基础颜色。非金属=漫反射色，金属=反射色。不含光照信息。\n- **Normal（法线）**：扰动表面法线，模拟细节凹凸，不改变几何。蓝紫色为主。\n- **Metallic（金属度）**：0=非金属，1=金属。决定 F0 和 kD。\n- **Roughness（粗糙度）**：0=镜面光滑，1=粗糙。控制高光散布。\n- **AO（环境遮蔽）**：缝隙处的环境光遮蔽，黑色=遮蔽强。多用于细节 AO（贴图），区别于 SSAO。\n- **Emission（自发光）**：发光颜色，可参与 Bloom，可烘焙为 lightmap 光源。\n\n打包技巧：Metallic + AO + Detail Mask + Smoothness 常打包进一张 Mask Map（RGBA），省 3 张纹理采样。\n\n易错：Normal 必须设为 Normal 类型（DXT5nm/BC5），不能当普通颜色压 BC7，否则法线变形。",
+    "tags": [
+      "PBR",
+      "贴图",
+      "Albedo",
+      "Normal"
+    ]
+  },
+  {
+    "id": "shader-034",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "PBR 贴图的 sRGB 和 Linear 设置错误会导致什么问题？",
+    "answer": "颜色贴图（含颜色信息）必须 **sRGB**，数据贴图必须 **Linear**。\n\n- **Albedo、Emission、自发光颜色** → sRGB（美术在 sRGB 空间绘制的颜色）。\n- **Normal、Metallic、Roughness、AO、Height** → Linear（数据，不是颜色）。\n\n错误后果：\n- Normal 设 sRGB：gamma 2.2 会让法线偏蓝，光照方向错误，物体发暗或高光位置错。\n- Metallic/Roughness 设 sRGB：数值被 gamma 曲线扭曲，金属感/粗糙度全错。例 Roughness 0.5 实际变 0.21（变光滑）。\n- Albedo 设 Linear：颜色变暗发灰。\n\nUE5 导入设置：Texture Type 选正确（Normal map 自动 Linear，其余在 Advanced 勾 sRGB）。\n\n实战排查：物体颜色不对，先检查贴图的 sRGB 开关，再看材质参数，最后看光照。70% 的 \"颜色发灰\" 问题是 sRGB 错。",
+    "tags": [
+      "sRGB",
+      "Linear",
+      "PBR",
+      "贴图"
+    ]
+  },
+  {
+    "id": "shader-035",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "Shader 性能优化的通用思路？从哪几个维度分析？",
+    "answer": "四个维度：\n\n**1. ALU（算术指令）**\n- 减少数学函数（sin/pow/log 代价高）。\n- 用 step/lerp/saturate 替代 if/else（避免分支）。\n- 把计算挪到顶点着色器。\n\n**2. 纹理采样（带宽）**\n- 减少采样次数（合并通道、用查找表）。\n- 用 mipmap，禁用不必要的高分辨率。\n- 移动端单 shader 采样建议 ≤4。\n\n**3. 寄存器/插值器**\n- 减少 varying 数量（打包）。\n- 降低精度（half 代替 float）。\n- 寄存器溢出会导致性能腰斩。\n\n**4. 片元数量（填充率）**\n- 减少 overdraw（AlphaTest 优先）。\n- 屏幕后处理降采样。\n- LOD 远距离用简化 shader。\n\n分析工具：UE5 Shader Complex（红黄绿）、Mali Offline Compiler、RenderDoc 看指令数、Frame Debugger 看 Pass 数。",
+    "tags": [
+      "优化",
+      "ALU",
+      "带宽",
+      "Shader复杂度"
+    ]
+  },
+  {
+    "id": "shader-036",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "为什么移动端要避免动态分支（if/else）？如何用 step/lerp 替代？",
+    "answer": "GPU 是 SIMD 架构，一个 warp/wavefront 内的线程执行相同指令。遇到分支时：\n- 若所有线程走同一分支：无开销（统一分支）。\n- 若线程走不同分支（发散）：**两个分支都要执行**，再用掩码丢弃，性能减半甚至更多。\n- 分支基于纹理采样值（如 `if(tex.r>0.5)`）几乎必然发散。\n\n移动 GPU（Mali/Adreno）的 warp 较大（16-64），发散代价更明显。\n\n替代技巧：\n```\n// 避免\nif (x > 0.5) col = red; else col = blue;\n\n// 替代\ncol = lerp(blue, red, step(0.5, x));\n\n// 多分支\nfloat s = step(0.5, x);  // 0 or 1\ncol = lerp(blue, red, s);\n```\n\n`step(a,x)` = `x>=a ? 1 : 0`，`saturate` 截断到 [0,1]，`smoothstep` 做平滑过渡。\n\n注意：能统一分支的（基于 uniform 的 if）可以用，不发散。基于 per-pixel 数据的 if 才要避免。",
+    "tags": [
+      "分支",
+      "step",
+      "SIMD",
+      "移动端"
+    ]
+  },
+  {
+    "id": "shader-037",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "Shader 中纹理采样次数对性能的影响？如何减少采样？",
+    "answer": "每次纹理采样 = 一次内存访问，移动端带宽是主要瓶颈。一个 shader 采样 8 次 vs 2 次，性能差 2-4 倍。\n\n减少策略：\n\n**1. 通道合并**：把 Metallic、AO、Smoothness、Detail Mask 打包进一张 RGBA（Mask Map），1 次采样代替 4 次。\n\n**2. 查找表（LUT）**：把复杂计算（如 IBL 的 Fresnel-roughness）预烘焙成 2D 纹理，1 次采样代替几十次三角函数。\n\n**3. 预烘焙**：噪声、柏林噪声等可烘焙成纹理，避免运行时多次噪声计算。\n\n**4. 降级**：远距离 LOD 减少采样次数（关法线、关细节）。\n\n**5. 共享 UV**：多个贴图用相同 UV 时，硬件纹理缓存命中率更高，看似采样多但实际带宽友好。\n\n移动端经验值：单 shader 采样 ≤4 为优，4-8 可接受，>8 要重设计。\n\n注意：SceneTexture（SceneColor / PostProcessInput0）采样代价更高（全屏带宽），移动端慎用。",
+    "tags": [
+      "纹理采样",
+      "带宽",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-038",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的 Shader Complexity（着色器复杂度）可视化工具怎么用？红黄绿含义？复杂度超标怎么办？",
+    "answer": "**Shader Complexity 可视化工具**：\n\n**开启方式**：Viewport > Show > Visualize > Shader Complexity；或 Viewport 顶部 Lit 模式下拉 > Shader Complexity\n\n**颜色含义**：\n| 颜色 | 复杂度 | 含义 |\n| 绿色 | 0-50 | 简单，性能好 |\n| 黄色 | 50-200 | 中等，可接受 |\n| 橙色 | 200-500 | 偏高，需关注 |\n| 红色 | 500-1000 | 高，需优化 |\n| 粉/白 | > 1000 | 极高，必优化 |\n\n**复杂度衡量**：Pixel Shader 指令数（ALU + 纹理采样），不是顶点复杂度\n\n**常见导致复杂度高的原因**：\n1. 过多纹理采样（超过 8 张贴图要警惕）\n2. 复杂噪声/数学（sin/cos/pow/log 比 + - * / 贵）\n3. 多光源 Forward（每光每像素算，光源多复杂度叠加）\n4. PPM（Post Process Material）全屏复杂度 ×屏幕像素数\n\n**优化手段**：\n1. **减少纹理采样**：通道打包（Mask Map）、Texture Array\n2. **数学优化**：pow(x,2) 用 x*x 替代；step(a,b) 比 if 快\n3. **移顶点到 VS**：Customized UV 把 UV 变换放顶点\n4. **LOD 材质**：近处高复杂材质，远处低复杂材质\n5. **Feature Level 分档**：r.MaterialFeatureLevel = ES31（移动）/ SM5（PC）/ SM6（DX12）\n6. **静态分支（StaticSwitch）**：编译期分支，不用的分支不编译进 Shader\n\n**材质 Stats 查看**：Material Editor > Window > Stats，显示 Instructions / Texture Samplers / Shader Count\n\n**移动端特殊**：移动端 Shader Complexity 阈值更低（< 100 为好）；r.Mobile.MaxShaderComplexity 设置上限\n\n**和 Unity Shader Complexity 的对比**：Unity URP/HDRP 也有 Shader Complexity 视图，颜色含义类似\n\n**面试加分点**：Quadratic Overdraw 视图看透明叠加；Texture Streaming 影响带宽但不影响 Shader Complexity；r.ShaderComplexity.MaxCells 调节复杂度视图的颜色映射范围。",
+    "tags": [
+      "ShaderComplexity",
+      "可视化",
+      "性能",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-039",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "顶点着色器能帮片元着色器分担哪些工作？",
+    "answer": "顶点数 << 像素数，把计算挪到 VS 能显著减负。\n\n适合挪到 VS 的：\n1. **空间变换**：世界法线、世界坐标、切线空间→世界矩阵，VS 算一次，FS 用插值。\n2. **方向计算**：`viewDir = normalize(worldPos - cameraPos)`，VS 算近似（插值后略有偏差但够用）。\n3. **光照方向**：主光方向恒定，VS 算 NdotL 存插值（顶点光照）。\n4. **UV 动画**：UV 偏移在 VS 算，FS 直接采样。\n5. **视差/位移预算**：高度图偏移在 VS 算近似。\n\n不能挪的：\n- 依赖 per-pixel 法线贴图的计算（必须 FS）。\n- 高精度 specular（插值破坏高光）。\n- 噪声采样（VS 顶点数少，结果不平滑）。\n- 任何需要 SV_POSITION 推导的屏幕空间计算。\n\n权衡：顶点光照便宜但精度差，地形/远 LOD 用，近景角色用 FS。",
+    "tags": [
+      "顶点着色器",
+      "优化",
+      "分担"
+    ]
+  },
+  {
+    "id": "shader-040",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "Shader 中 sin/cos/pow/exp/log 等数学函数的开销如何？",
+    "answer": "GPU 数学函数开销排序（粗略，以加法为 1）：\n- 加减乘、比较：1\n- mad（乘加）：1\n- saturate、abs、negate：免费（指令修饰）\n- min/max、step：1\n- **rsqrt（平方根倒数）**：2-4（GPU 有专用快速近似）\n- **除法**：4-8\n- **lerp**：1-2\n- **sin/cos**：4-8（查表 + 泰勒）\n- **pow**：8-12（exp + log 组合）\n- **exp/log**：8-12\n- **asin/acos/atan**：12-20（更复杂）\n- **tan**：10-15\n\n优化技巧：\n- `sqrt(x)` 用 `rsqrt(x)*x` 更快。\n- `pow(x, n)` 若 n 是小整数，展开成 `x*x*x`。\n- `abs(sin)` 用三角形波近似（艺术上够用）。\n- 半精度 sin/cos 在移动端有硬件加速。\n- 避免 `atan2`（贵），能用预烘焙就预烘焙。\n\n实战：噪声函数里大量 sin，可换成哈希 + 插值，性能提升 3-5 倍。",
+    "tags": [
+      "数学函数",
+      "ALU",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-041",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "multi_compile 和 shader_feature 的区别？分别用于什么场景？",
+    "answer": "两者都通过 `#pragma` 定义编译开关，生成多个 shader 变体，但启用方式不同。\n\n**multi_compile**：\n- 所有关键字变体**全部打包进 build**（除非剥离）。\n- 材质面板不直接控制，靠全局 `Shader.EnableKeyword`。\n- 适合：全局功能开关（雾、HDR、阴影开关），所有材质可能用到的。\n- 例：`#pragma multi_compile _ _MAIN_LIGHT_SHADOWS`\n\n**shader_feature**：\n- 只生成材质实际用到的变体（基于材质勾选的 keyword）。\n- 材质面板可勾选（用 `[Toggle]` 特性）。\n- 适合：per-material 功能开关（如某角色用描边、某不用）。\n- 例：`#pragma shader_feature _OUTLINE_ON`\n\n变体数量爆炸计算：N 个 multi_compile 各 2 选项 → 2^N 变体。所以慎用 multi_compile。\n\n实战：能用 shader_feature 就别用 multi_compile，能合并就合并。",
+    "tags": [
+      "变体",
+      "multi_compile",
+      "shader_feature"
+    ]
+  },
+  {
+    "id": "shader-042",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 材质变体爆炸问题怎么解决？如何控制材质/Shader 变体数量？",
+    "answer": "**UE5 材质变体来源**：UE5 的材质系统会为不同配置生成大量 Shader 变体。\n\n**变体来源**：\n1. **静态参数（StaticSwitchParameter）**：每个静态开关 2 倍变体，N 个开关 = 2^N 变体\n2. **Shading Model**：Default / Subsurface / Hair / Cloth / Eye / ClearCoat\n3. **Feature Level**：ES3.1 / SM5 / SM6\n4. **Quality Level**：Low / Medium / High / Epic\n5. **Blend Mode**：Opaque / Masked / Translucent / Additive / Modulate\n6. **Material Domain**：Surface / Decal / Post Process / UI / Light Function\n7. **Usage 标记**：Used with Skeletal Mesh / Niagara / Particle / UI...\n\n**总变体数**：变体数 = 2^(静态开关数) × ShadingModel数 × FeatureLevel数 × QualityLevel数 × BlendMode数 × ...\n\n**控制变体的策略**：\n1. **减少静态开关**：用运行时参数（ScalarParameter）替代（但有分支开销）；合并相似开关\n2. **精准 Usage 标记**：只勾选实际用到的 Usage，不要勾 Used with Everything\n3. **Quality Level 分档**：r.MaterialQualityLevel 全局控制，材质里用 Quality Switch 节点\n4. **Feature Level 裁剪**：移动端项目只保留 ES3.1\n5. **共享 Parent Material**：多个 Material Instance 共享一个 Parent，只编译 Parent 的 Shader\n6. **Shader Stripping**：Project Settings > Engine > Cooking > Strip Shader Variants\n\n**编译时间优化**：\n- Shader Compile Worker：r.ShaderCompiling.NumCompilingThreads 多线程编译\n- 分布式编译：XGE / FastBuild 加速\n- Shader Cache：r.ShaderCache 缓存编译结果\n- 增量编译：未改材质跳过\n\n**和 Unity 变体爆炸的对比**：\n| Unity | UE5 |\n| multi_compile / shader_feature | StaticSwitchParameter |\n| variant stripping | Project Settings > Cooking |\n| Shader Collection | Material Usage 标记 |\n\nUnity 的 multi_compile 更易失控，UE5 的 StaticSwitch 也翻倍但更可控（Usage 精准标记）\n\n**面试加分点**：Material Instance 不增加变体（MID 共享 Parent Shader）；Shared: Yes 的 Custom node 共享 HLSL 代码；r.ShaderDevelopmentMode=1 开发模式加速迭代。",
+    "tags": [
+      "变体",
+      "Shader",
+      "StaticSwitch",
+      "Stripping"
+    ]
+  },
+  {
+    "id": "shader-043",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "Shader Variant Collection 是什么？如何用它预热和统计变体？",
+    "answer": "SVC 是记录\"哪些 shader 的哪些变体被实际使用\"的资源，用于：\n\n**1. 预热（Warmup）**：在场景加载时一次性编译所有变体，避免运行时编译卡顿。\n```\nShaderVariantCollection svc = ...;\nsvc.WarmUp();\n```\n首次遇到新变体会触发编译（几百 ms 卡顿），预热消除这个 spike。\n\n**2. 统计**：查看实际用到的变体数，识别冗余。\n\n**3. 剥离依据**：配合 `IPreprocessShaders`，只保留 SVC 里的变体。\n\n使用流程：\n- 工程里跑一遍所有关卡，让所有材质都渲染过。\n- `Edit > Graphics Settings > Save to asset...` 保存当前变体集。\n- 或脚本 `ShaderUtil.RegisterShaderCodeCollection` 收集。\n\n注意：SVC 不记录 LightMode，所以 ShadowCaster 等 Pass 的变体要单独收集（跑阴影场景）。",
+    "tags": [
+      "变体",
+      "SVC",
+      "预热"
+    ]
+  },
+  {
+    "id": "shader-044",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "local 关键字和 global 关键字的区别？何时用 local？",
+    "answer": "UE5 关键字分两种命名空间：\n\n**global**：`#pragma multi_compile A B` / `#pragma shader_feature A`\n- 占用全局关键字槽位（总数有限，旧版 384 个）。\n- 全局唯一，多个 shader 共享同名关键字会互相影响。\n- `Shader.EnableKeyword(\"A\")` 对所有 shader 生效。\n\n**local**：`#pragma multi_compile_local A B` / `#pragma shader_feature_local A`\n- 每个 shader 独立计数，不占全局槽。\n- 适合 per-shader 的功能开关，避免污染全局。\n- 缺点：不能全局开关，必须 per-material。\n\n选择：\n- 跨 shader 共享的全局特性（雾、HDR）→ global。\n- 单个 shader 内部功能（描边、噪声开关）→ local。\n\n注意：关键字槽满了会导致新关键字失效，常见报错 \"Keyword overflow\"。新项目尽量 local，把 global 留给引擎特性。",
+    "tags": [
+      "关键字",
+      "local",
+      "global"
+    ]
+  },
+  {
+    "id": "shader-045",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "如何查看项目中实际编译了哪些 Shader 变体？",
+    "answer": "几种方式：\n\n**1. Graphics Settings**：\n- `Edit > Project Settings > Graphics > Shader Loading`，看总变体数和已加载变体数。\n- 点 \"Save to asset...\" 把当前已加载的变体存成 SVC。\n\n**2. EditorUtility 收集**：\n```\nShader shader = ...;\nvar info = new ShaderVariantCollection();\n// 跑场景后\nforeach (var v in ShaderUtil.GetVariantCollection(shader)) {\n  Debug.Log(v.passType + \" \" + v.keywords);\n}\n```\n\n**3. IPreprocessShaders 报告**：\n```\nclass VariantReporter : IPreprocessShaders {\n  public void OnProcessShader(Shader sh, ShaderSnippetData sn, IList<ShaderCompilerData> data) {\n    Debug.Log($\"{sh.name} {sn.passType}: {data.Count} variants\");\n  }\n}\n```\n\n**4. 包体分析**：Build Report 看 shader 在包里占多少。\n\n实战：发布前跑一遍核心场景，导出变体列表，对照预期，超 100 的 shader 要审查。",
+    "tags": [
+      "变体",
+      "分析",
+      "工具"
+    ]
+  },
+  {
+    "id": "shader-046",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的 Shader Stripping（变体剔除）怎么配置？Cook 时默认剔除哪些？",
+    "answer": "**UE5 Shader Stripping 体系**：UE5 在 Cook 阶段自动剔除未使用的 Shader 变体，减小包体。\n\n**自动 Stripping 原则**：\n1. 未引用的材质：场景/蓝图/资源没引用的材质，其 Shader 被剔除\n2. 未使用的 Shading Model：材质里没用的 Shading Model 变体剔除\n3. 未使用的 Feature Level：项目没启用的 Feature Level 剔除\n4. 未使用的 Blend Mode：材质没用的 Blend Mode 剔除\n5. 未使用的 Usage：没勾选的 Usage 变体剔除\n\n**配置入口**：\n\n1. **Project Settings > Engine > Cooking**：Strip Shader Variants for Missing Uses / Strip Shader Variants for Missing Materials\n2. **Project Settings > Engine > Rendering**：Material Quality Level（勾选启用的质量档）/ Feature Level / Forward Shading / Deferred Shading\n3. **Console Variables**：r.ShaderStripping.LogStats 1（记录剔除统计）\n\n**手动 Stripping**：\n1. **Material Usage 精准标记**：Material Editor > Details > Usage，只勾实际用到的，避免勾 Used with Everything\n2. **材质资产标记**：Material > Asset > Stripping Tags（自定义标记）\n3. **Cook 过滤**：DefaultGameUserSettings.ini 配置 Cook 平台\n\n**Cook 后验证**：Saved/Cooked/<Platform>/<Game>/Content/ShaderArchive-*，用 unrealpak 查看包体\n\n**常见变体膨胀源**：\n1. Niagara 默认材质：用 Used with Niagara 精准标记\n2. UI 材质：用 Used with UI 限制\n3. Post Process Material：每个 PPM 多套变体，控制数量\n4. 静态开关组合：10 个开关 = 1024 变体\n\n**和 Unity Stripping 的对比**：\n| Unity | UE5 |\n| Shader Stripping（Project Settings） | Cooking > Strip Shader Variants |\n| variant filter（手动） | Material Usage 标记 |\n| Shader Variant Collection | 无直接对应，靠 Usage 控制 |\n| IPreprocessShaders 接口 | FShaderCompilingManager 扩展 |\n\n**面试加分点**：Shared Shader Archives（UE5 5.0+ Shader 归档，跨关卡共享）；PSO（Pipeline State Object）Cache 预编译 PSO 减少运行时卡顿；r.ShaderPipelineCache.Enabled 启用 PSO 缓存。",
+    "tags": [
+      "Stripping",
+      "Cook",
+      "变体",
+      "包体"
+    ]
+  },
+  {
+    "id": "shader-047",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 Material Editor（节点图）的优劣？什么场景适合用节点图，什么场景适合手写 HLSL？",
+    "answer": "**Material Editor（节点图）的优势**：\n\n1. **美术友好**：可视化节点，无需写代码，实时预览，拖拽连线\n2. **引擎自动优化**：编译器自动优化（常量折叠、死代码消除），自动处理空间变换，自动生成各平台 Shader\n3. **跨平台**：一套节点图，引擎自动生成各平台 HLSL（ES3.1/SM5/SM6）\n4. **调试友好**：节点实时预览值、Breakpoint、Shader Complexity 视图\n\n**Material Editor 的劣势**：\n1. **复杂逻辑表达困难**：循环不支持（需 Custom node），复杂分支节点图会很乱\n2. **性能边界**：节点图生成的 HLSL 可能有冗余，极致优化需手写 HLSL\n3. **不适合非材质逻辑**：不能写 Compute Shader（要 C++ + RDG），不能做渲染管线扩展\n\n**适合用节点图的场景**：\n1. 标准 PBR 材质（角色/场景/道具）\n2. 简单特效材质（溶解、流光、菲涅尔）\n3. UI 材质（UMG）\n4. 卡通渲染（描边、色块）\n5. 教学/原型快速验证\n\n**适合手写 HLSL（Custom node / .usf）的场景**：\n1. 复杂噪声/算法（Simplex、Voronoi、ray march）\n2. 循环密集（ray march、积分计算、球谐）\n3. Compute Shader（粒子、物理、图像处理）\n4. 移植外部 Shader（ShaderToy、论文、其他引擎）\n5. 极致优化（性能关键路径，需手动控制指令）\n6. 渲染管线扩展（自定义 Pass，C++ + RDG）\n\n**混合策略（推荐）**：主体用节点图，复杂算法用 Custom node，复用逻辑封装成 Material Function，性能热点用 HLSL 手写\n\n**和 Unity ShaderGraph 的对比**：\n| Unity ShaderGraph | UE5 Material Editor |\n| 黑盒 SubGraph | 透明 Material Function |\n| Custom Function Node | Custom node |\n| 预览节点值 | 预览节点值 |\n| HLSL 生成可查看 | HLSL 生成可查看 |\n\n两者思路一致，UE5 更成熟（MF 体系、Stats、自动优化）\n\n**面试加分点**：Material Editor 的 HLSL 查看（Window > Shader Code > HLSL Code）；Convert to Material Function 选中节点右键转 MF；Material Instance Dynamic 是 UE5 控制变体的标准模式。",
+    "tags": [
+      "MaterialEditor",
+      "节点图",
+      "HLSL",
+      "取舍"
+    ]
+  },
+  {
+    "id": "shader-048",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 Material Function（材质函数）的复用机制？如何创建和管理函数库？",
+    "answer": "**Material Function 复用机制**：可复用材质逻辑单元，类似 Unity SubGraph，但更原生。\n\n**创建方式**：\n1. **独立资产**：Content Browser > Right Click > Material > Material Function，添加 Input/Output 节点，连接逻辑\n2. **从材质图提取**：选中一组节点 > Right Click > Convert to Function，自动创建 MF 资产\n\n**Input/Output 节点**：声明函数输入（名称/类型/默认值）和输出（名称/类型），支持多输入多输出，类型：float/float2/3/4/Texture/bool\n\n**使用方式**：在 Material Editor 右键 > Material Function > 选择，或拖拽 MF 资产到材质图\n\n**MF 库管理**：\n1. **Expose to Library**：MF 资产 > Details > Expose to Library = true，勾选后该 MF 出现在所有材质的右键菜单\n2. **命名规范**：前缀 MF_（如 MF_FresnelOutline），团队统一前缀便于检索\n3. **版本控制**：MF 是独立 .uasset，可单独 diff，改 MF 所有引用材质自动更新\n\n**MF 的优势**：\n1. 跨材质复用：写一次，多个材质用\n2. 统一维护：改一处，所有引用更新\n3. 降低出错：美术用现成 MF，TA 把控质量\n4. 编译时内联展开，不增加运行时开销\n\n**MF 的限制**：不能递归（MF_A 不能调用 MF_A）；循环依赖会报错；复杂 MF 让材质编译变慢\n\n**性能注意**：MF 是编译期内联展开，运行时零开销；但复杂 MF 会让材质 Shader 编译时间增加；避免 MF 套 MF（嵌套过深编译慢）；共享代码用 Shared: Yes 的 Custom node\n\n**和 Unity SubGraph 的对比**：\n| Unity SubGraph | UE5 Material Function |\n| 黑盒，输入输出固定 | Input/Output 节点声明 |\n| Property 传参 | Input 引脚传参 |\n| 嵌套有限制 | 可嵌套（不能递归） |\n| 无独立资产 diff | 独立 .uasset，可 diff |\n\n**面试加分点**：MF 是纯函数，不能存状态；Function Editor 有 Preview 可单独调试 MF；Make Material Function 节点可在材质图里直接创建临时 MF。",
+    "tags": [
+      "MaterialFunction",
+      "复用",
+      "函数库",
+      "SubGraph"
+    ]
+  },
+  {
+    "id": "shader-049",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 材质里 Custom node（自定义 HLSL 节点）怎么用？有什么限制？",
+    "answer": "**Custom node 用法**：UE5 Material Editor 里的特殊节点，允许直接写 HLSL 代码。\n\n**创建**：Material Editor 右键 > Custom\n\n**配置**：\n1. **Code 框**：直接写 HLSL 代码，用 return 返回结果，可用局部变量、for/while/if\n2. **Inputs**：点 + 添加输入引脚，每个输入有名字（如 UV / Time / Color），在 Code 里直接引用\n3. **Output Type**：CMOT Float 1/2/3/4，决定 return 类型\n\n**示例（简单噪声）**：\n```hlsl\nfloat2 p = UV * Scale;\nfloat n = sin(p.x) * cos(p.y);\nreturn n * 0.5 + 0.5;\n```\n\n**限制**：\n1. **不能直接采样纹理**：纹理采样要用 TextureSample 节点传入（作为 Input），或用 TextureObjectParameter 传引用\n2. **数组输入受限**：可传数组但移动端支持有限，用 Texture2DArray 替代\n3. **移动端兼容**：Custom HLSL → GLSL/ESSL 转换，部分 HLSL 特性移动端不支持，测试 Feature Level ES3.1\n4. **调试**：无节点级断点，用 printf（UE5 5.1+ 的 Shader printf）或输出到颜色查看\n5. **共享代码**：默认每个 Custom node 独立编译；Shared: Yes 选项让多个 Custom node 共享代码\n\n**性能与最佳实践**：\n1. 简单逻辑用节点图（Custom node 不会被节点优化器处理）\n2. 复用逻辑封装成 Material Function\n3. 纹理采样用节点（TextureSample 传入 Custom，不在 Custom 里采样）\n4. 移动端测试确保 Custom HLSL 在 ES3.1 下编译通过\n5. Shared: Yes 让多个 Custom 共享代码，避免重复编译\n6. 避免过长 Code，超过 100 行考虑拆成 .usf 文件 + #include\n\n**和 Unity Custom Function Node 的对比**：\n| Unity | UE5 |\n| 支持 HLSL / HLSL file | 只支持 HLSL（内联） |\n| String / File 模式 | Code 框模式 |\n| 可引用外部 .hlsl | 可引用 .usf 文件 |\n\n**面试加分点**：.usf / .ush 文件是 UE5 的 Shader 文件，可被 Custom node #include；Virtual Shader Path /Engine/Generated/ 访问引擎 Shader；r.MaterialEnableNewHLSLGenerator=1 新 HLSL 生成器，Custom node 更高效。",
+    "tags": [
+      "CustomNode",
+      "HLSL",
+      "MaterialEditor",
+      "限制"
+    ]
+  },
+  {
+    "id": "shader-050",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 Material Editor 生成的代码性能和手写 HLSL 相比如何？如何优化？",
+    "answer": "**节点图生成代码的性能特征**：\n\n**总体结论**：现代节点图生成器（UE5 New HLSL Generator）优化良好，多数场景接近手写；但极致优化场景（ray march/复杂噪声/大量循环）手写仍占优。\n\n**生成代码的特点**：\n1. **常量折叠**：编译期常量自动计算，运行时无开销\n2. **死代码消除**：未连接到输出的节点被剔除\n3. **冗余代码**：节点图可能有重复计算（多个节点用了相同输入但没合并），手写可手动共享中间变量\n4. **空间变换**：节点图的 Transform 节点生成标准矩阵乘法，手写可优化\n\n**性能对比实例**：\n- 简单 PBR 材质：节点图 50-80 指令 vs 手写 40-60 指令，差 10-20%，可接受\n- 复杂噪声（Voronoi）：节点图 200+ 指令（展开循环）vs 手写 Custom 80-100 指令，差 2 倍\n- Ray March：节点图几乎无法表达（无循环），必须手写\n\n**优化节点图生成代码**：\n1. **检查生成的 HLSL**：Material Editor > Window > Shader Code > HLSL Code\n2. **Stats 面板**：Window > Stats，看 Instructions / Texture Samplers / Shader Count\n3. **合并相同计算**：多个节点用相同输入时，提取成单独节点再复用\n4. **移顶点到 VS**：UV 变换用 Customized UV（顶点阶段插值）\n5. **减少纹理采样**：通道打包（Mask Map）、Texture Array\n6. **静态分支（StaticSwitch）**：编译期分支，不用的分支剔除\n7. **精度控制**：移动端用 half\n8. **LOD 材质**：近 LOD 用复杂材质，远 LOD 用简化材质\n\n**何时手写更优**：循环密集算法（ray march/积分）；复杂数学（球谐/Fourier）；自定义采样模式；极致指令数优化\n\n**何时节点图够用**：标准 PBR 材质；简单特效（溶解/菲涅尔）；UI 材质；卡通渲染基础\n\n**和 Unity 的对比**：Unity ShaderGraph 生成代码优化类似（常量折叠/死代码消除）；Unity HDRP 的 Lit.shader 是手写 HLSL，性能最优；UE5 引擎内置材质是手写 + 节点图混合\n\n**面试加分点**：New HLSL Generator（r.MaterialEnableNewHLSLGenerator=1）UE5 新生成器优化更好；Material Stats 对比优化前后指令数；Mobile Half Precision 移动端用 half 省寄存器。",
+    "tags": [
+      "MaterialEditor",
+      "性能",
+      "HLSL",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-051",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "UE5 材质里如何做顶点位移（Vertex Displacement）？World Position Offset 的用法和限制？",
+    "answer": "**World Position Offset (WPO) 体系**：WPO 是 UE5 材质 Main Material Node 的一个输出引脚，用于顶点位移。在 Vertex Shader 阶段应用：WorldPos += WPO，不改变顶点数，只移动顶点位置。\n\n**常见用法**：\n1. **简单位移（风/呼吸）**：World Position → Subtract(ObjectPosition) → 局部坐标，Time × Frequency → 正弦 → 振幅 × → WPO\n2. **噪声位移（地形/水面）**：UV → Noise Texture → Sample，Noise × Amplitude → WPO\n3. **顶点动画（飘动/摆动）**：VertexNormalWS × WindDir × sin(Time + Phase)，Phase 基于顶点位置让不同顶点不同步\n4. **顶点收缩（爆炸/消失）**：VertexNormalWS × (-1) × Progress → WPO\n5. **置换贴图（高度图）**：HeightMap → Sample → r 通道，r × Amplitude × VertexNormalWS → WPO\n\n**WPO 的限制与坑**：\n1. **不改变顶点数**：WPO 只移动顶点，不能增加顶点。高频位移需要高模\n2. **法线不自动更新**：WPO 移动顶点后，法线还是原来的，光照计算用错法线。解决：用 Compute normals in shader 或预计算\n3. **阴影问题**：WPO 位移后，阴影可能不跟随。解决：开启 Cast Shadow with WPO（材质 Details），但会增加 Shadow Pass 成本\n4. **碰撞不更新**：WPO 是渲染层位移，物理碰撞不变\n5. **LOD 问题**：不同 LOD 顶点数不同，WPO 效果不一致。低 LOD 顶点稀疏，位移锯齿明显\n6. **性能开销**：WPO 在 VS 阶段，每个顶点执行，高模（百万顶点）WPO 贵\n7. **TAA/Motion Blur**：WPO 动画会触发 Velocity Pass，需开启 bOutputVelocity = true\n\n**曲面细分（Tessellation）配合 WPO**：Tessellation 增加顶点数，配合 WPO 做高细节位移。材质 Details > Tessellation Mode：Flat / PN Triangles。移动端不支持\n\n**Nanite 与 WPO**：Nanite 自动 LOD，顶点数自适应，支持 WPO 但位移幅度有限制，适合环境（风吹草地），不适合极端位移\n\n**最佳实践**：高模 + WPO（顶点密集才能平滑位移）；法线重新计算；阴影处理（开启 Cast Shadow with WPO）；LOD 差异化（远 LOD 减小 WPO 振幅）；移动端限制 WPO 复杂度（< 10 指令/顶点）\n\n**和 Unity Vertex Displacement 的对比**：Unity 在 Vertex Shader 位移，需手写 HLSL；UE5 节点图直接接 WPO 引脚，引擎部分自动处理法线\n\n**面试加分点**：WPO 是世界空间偏移，要用世界或局部坐标计算；Vertex Color 驱动控制位移强度（树根不动、叶子动）；Nanite + WPO 让效果更平滑（顶点自适应）。",
+    "tags": [
+      "WPO",
+      "顶点位移",
+      "VertexShader",
+      "Tessellation"
+    ]
+  },
+  {
+    "id": "shader-052",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "描边（Outline）Shader 的几种实现方案？各自的优缺点？",
+    "answer": "**方案一：法线外扩（最常用）**\n- Cull Front，顶点沿法线外扩 _OutlineWidth。\n- 优点：廉价，一 Pass 搞定。\n- 缺点：硬边模型法线突变会断线；远距离描边变粗（需按距离缩放）；法线贴图不影响。\n\n**方案二：后处理描边**\n- 屏幕空间：Sobel/Roberts 边缘检测深度或法线。\n- 优点：描边均匀，与几何无关。\n- 缺点：全屏 pass 贵；描边会被遮挡物覆盖；细节处描边丢失。\n\n**方案三：Stencil 描边**\n- 先画本体写 Stencil，再画放大版本体但 Stencil 测试丢弃本体区域，只留外扩边。\n- 优点：边宽可控。\n- 缺点：多 Pass 多 draw call。\n\n**方案四：反转法线 + Back Face**\n- 法线翻转，画背面填充。\n\n**方案五：Toon Shader 内置描边**\n- 卡通渲染常配法线外扩 + 颜色渐变。\n\n优化：法线外扩时把硬边法线平滑化（DCC 烘焙平滑法线到顶点色或 UV2），避免断裂。",
+    "tags": [
+      "描边",
+      "Outline",
+      "卡通"
+    ]
+  },
+  {
+    "id": "shader-053",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "卡通渲染（Toon Shader）的核心要素？",
+    "answer": "三大要素：\n\n**1. 阶梯光照（Ramp Shading）**\n- 把 NdotL 的 [0,1] 映射成离散色阶（2-4 段）。\n- `float ramp = step(0.5, NdotL) * 0.5 + step(0.2, NdotL) * 0.3 + 0.2;`\n- 或用 Ramp 贴图采样（一维纹理，UV.x = NdotL）。\n- 形成明暗硬边，不渐变。\n\n**2. 描边（Outline）**\n- 法线外扩（见上题）。\n- 描边颜色可固定或随光照变化。\n\n**3. 硬阴影阈值**\n- 阴影不柔和，按阈值二值化。\n- 接收阴影用 step 截断。\n\n进阶：\n- 高光也阶梯化（specular threshold）。\n- 边缘光（Rim/Fresnel）增强轮廓。\n- 脸部特殊法线贴图（修整法线让光照符合美术设定，非物理正确）。\n- 头发各向异性高光（双层高光带）。\n\n原神/崩坏的卡通渲染还加：次表面散射近似、衣物褶皱色、面部阴影贴图控制。",
+    "tags": [
+      "卡通",
+      "Toon",
+      "Ramp"
+    ]
+  },
+  {
+    "id": "shader-054",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "水面 Shader 的核心要素？法线流动、菲涅尔、折射、泡沫怎么实现？",
+    "answer": "**UE5 水面材质核心要素**：\n\n**1. 法线流动（Normal Flow）**：\n- 两张法线贴图，不同速度/方向滚动，叠加产生复杂水面波纹\n- 节点图：UV × Scale + Time × Speed1 → FlowUV1，UV × Scale + Time × Speed2 → FlowUV2，Sample(NormalMap1/2) → Add → Normalize → Normal\n- 进阶：用 Flow Map 控制流向（非均匀流速）\n\n**2. 菲涅尔（Fresnel）**：\n- 水面边缘反射强，中心透射强\n- Fresnel 节点（基于 Normal · ViewDir）→ Lerp(DeepColor, ShallowColor, Fresnel)\n- 调 Exponent 控制边缘锐度\n\n**3. 折射（Refraction）**：\n- 透过水面看到水底变形\n- UE5 材质 Pixel Normal Offset 引脚（而非 Index of Refraction）\n- 或用 Refraction 节点（部分材质域）。透明材质（Translucent）才支持折射\n\n**4. 泡沫（Foam）**：\n- 基于深度差或高度阈值生成\n- SceneDepth → 采样场景深度，PixelDepth → 当前像素深度，DepthDiff = SceneDepth - PixelDepth\n- FoamMask = saturate((DepthDiff - FoamStart) / FoamRange)，FoamColor × FoamMask → 叠加到 Base Color\n\n**5. 深度渐变（Depth Gradient）**：\n- 浅水色 → 深水色过渡，基于水深（深度差）\n- DepthDiff → SmoothStep → Lerp(ShallowColor, DeepColor)\n\n**6. 反射（Reflection）**：\n- 用 Planar Reflection（Actor）或 Reflection Capture 或 SSR\n- 材质里用 ReflectionVectorWS 采样 Cubemap\n\n**材质设置**：Blend Mode = Translucent，Shading Model = Default Lit，Light Mode = Surface ForwardShading\n\n**性能注意**：\n1. 法线流动：双采样法线，移动端可减为单采样\n2. 折射：SceneColor 采样贵，移动端可关闭\n3. Planar Reflection：渲染镜像场景，极贵，移动端慎用\n4. SSR：屏幕空间反射，中等开销，移动端关闭\n\n**移动端简化版**：单法线贴图（不流动叠加）；简化菲涅尔（1 - N·V）；无折射（直接透明）；无泡沫或简化泡沫；Roughness 固定\n\n**面试加分点**：Gerstner Wave 真实水面波形（多正弦波叠加），UE5 可用 Custom node 实现；Flow Map 非均匀流向控制比双 UV 滚动更自然；WPO 水面顶点位移做波浪起伏，配合法线流动。",
+    "tags": [
+      "水面",
+      "Fresnel",
+      "折射",
+      "泡沫",
+      "Shader"
+    ]
+  },
+  {
+    "id": "shader-055",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "全息（Hologram）Shader 怎么实现？",
+    "answer": "全息效果组合：\n\n**1. 扫描线**\n```\nfloat scan = sin(worldPos.y * _ScanFreq - _Time.y * _ScanSpeed);\nscan = smoothstep(0.7, 1, scan);  // 细化成线\ncol += scan * _ScanColor;\n```\n\n**2. 闪烁/故障**\n- 周期性整体抖动：`col.r += sin(_Time.y * 30) * 0.05;`\n- 横向位移：UV.x 偶尔偏移（用噪声触发）。\n\n**3. 透明 + 边缘发光**\n- Fresnel 边缘亮：`rim = pow(1-NdotV, 3); col += rim * _EdgeColor;`\n- 主体半透明：`alpha = _BaseAlpha + rim;`\n\n**4. 主色单色化**\n- 去饱和，乘全息色：`col = dot(col, 0.333) * _HologramColor;`\n\n**5. 噪声扰动**\n- 整体叠噪声纹理，增强科技感。\n\n配置：\n```\nBlend SrcAlpha One   // 加法混合发光\nZWrite Off\nCull Off\nQueue=Transparent\n```\n\n性能：扫描线 + Fresnel + 单色化三件套就够，故障效果可关闭省 ALU。",
+    "tags": [
+      "全息",
+      "Hologram",
+      "扫描线"
+    ]
+  },
+  {
+    "id": "shader-056",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "热空气扭曲（Distortion）特效原理？UE5 里怎么实现？移动端的代价？",
+    "answer": "**Distortion（扭曲）原理**：采样背景像素 + 用法线/噪声偏移 UV，产生热空气/玻璃/魔法扭曲感。\n\n核心逻辑：采样当前像素的背景颜色（SceneColor / PostProcessInput0）→ 用法线或噪声计算 UV 偏移量 → 偏移 UV 重新采样背景 → 输出扭曲后的颜色\n\n**UE5 实现方式**：\n\n**方式 1：Post Process Material（全屏扭曲）**：\n- SceneTexture: PostProcessInput0 → 原始颜色\n- SceneTexture: CustomDepth → 检测扭曲物体区域\n- 用 CustomStencil 区分不同扭曲物体\n- 在扭曲区域：UV += Normal × DistortionStrength，重新采样 PostProcessInput0\n\n**方式 2：Translucent 材质（透明扭曲）**：\n- Blend Mode = Translucent\n- Pixel Normal Offset 引脚 → 用法线偏移 UV\n- 引擎自动采样背景并偏移，不需手动采样 SceneColor\n\n**移动端代价**：\n1. **SceneColor 采样贵**：全屏纹理采样，带宽高，移动端 Tile-Based GPU 尤其敏感\n2. **透明渲染开销**：Distortion 通常用 Translucent 材质，透明不走 Early-Z，Overdraw 累加\n3. **移动端限制**：UE5 移动端默认不采样 SceneColor（性能保护），Pixel Normal Offset 在移动端支持有限\n\n**移动端优化策略**：\n1. 限制扭曲区域：只在 Custom Depth 标记的区域扭曲\n2. 降低扭曲分辨率：渲染扭曲到半分辨率 RT，再 upscale\n3. 简化扭曲算法：用单张噪声贴图，不做多采样\n4. 替代方案：静态扭曲烘焙到贴图；UI 扭曲用粒子贴图模拟（无真实折射）；屏幕震屏直接 UV 偏移\n\n**和 Unity GrabPass 的对比**：\n| Unity GrabPass | UE5 |\n| GrabPass { } 抓屏 | SceneTexture: PostProcessInput0 |\n| 移动端极贵（全屏拷贝） | 移动端同样贵 |\n| 透明 Shader 用 tex2D(_GrabTexture) | Translucent 材质自动处理 |\n| Renderer Feature 替代 | PPM + Custom Depth |\n\n**最佳实践**：PC/主机用 PPM（Custom Depth 标记扭曲物体，局部扭曲）；移动端避免（用视觉欺骗替代真实折射）；限制同屏扭曲物体 < 3 个；半分辨率渲染扭曲 Pass\n\n**面试加分点**：Pixel Normal Offset 是 UE5 透明材质的扭曲引脚，比手动 SceneColor 采样高效；Separate Translucency 半透明分离渲染，扭曲更准但更贵。",
+    "tags": [
+      "Distortion",
+      "扭曲",
+      "Translucent",
+      "移动端"
+    ]
+  },
+  {
+    "id": "shader-057",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "体积光（Volumetric Light / God Rays）屏幕空间实现思路？",
+    "answer": "屏幕空间体积光（径向模糊法）：\n\n**原理**：从光源屏幕坐标出发，对场景颜色做径向采样累积，模拟光线穿过空气的散射。\n\n**步骤**：\n1. 把光源投影到屏幕，得到 `lightScreenPos`。\n2. 对每个像素，沿 \"当前像素 → 光源\" 方向多次采样深度缓冲。\n3. 若采样点深度 < 场景深度（被遮挡），贡献为 0；否则贡献光照色。\n4. 累积多次（16-64 次）采样，形成光柱。\n5. 叠加 Bloom 增强。\n\n**优化**：\n- 降采样（半分辨率或 1/4）做体积光，再上采样。\n- 用 dither + 时空抖动减少采样次数。\n- 极坐标采样。\n\n**3D 体积法（更准但贵）**：\n- 沿视线方向步进，每点采样阴影贴图判断是否在阴影里，累加散射。\n- 用于高质量阳光体积光。\n\n移动端：屏幕空间径向法便宜，能接受；3D 体积法太贵不用。",
+    "tags": [
+      "体积光",
+      "GodRays",
+      "后处理"
+    ]
+  },
+  {
+    "id": "shader-058",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "屏幕空间反射（SSR）原理和限制？UE5 里怎么配置？和 Ray Traced Reflection 的区别？",
+    "answer": "**SSR 原理**：在屏幕空间做光线步进，找反射命中点，采样场景颜色。\n\n核心算法：计算反射向量 R = reflect(-ViewDir, Normal) → 投影到屏幕空间 → 沿 R 方向步进，每次采样深度 → 比较步进深度与场景深度（命中则采样该点颜色，超出屏幕则 fallback 到 Cubemap）→ 按粗糙度混合\n\n**SSR 的限制**：\n1. **只反射屏幕内可见内容**：屏幕外/背对相机的物体无法反射，这是 SSR 最大的局限\n2. **噪声 + 模糊**：步进有限，粗糙表面需多次采样 + 模糊，会有噪点\n3. **角度限制**：掠射角（grazing angle）效果好，正面反射效果差\n4. **性能开销**：全屏 ray march，移动端极贵通常关闭\n\n**UE5 SSR 配置**：\n- Post Process Volume > Screen Space Reflections：Intensity / Quality / Max Roughness\n- Console Variables：r.SSR.Quality 1-4（质量）、r.SSR.HalfResSceneColor（半分辨率）、r.SSR.Temporal（时序滤波）\n- 材质控制：Roughness 低 → 参与 SSR；Roughness 高（> 0.6）→ 走 Reflection Capture\n\n**Lumen Reflection（UE5 旗舰）**：\n- 用 Lumen 替代/增强 SSR\n- 基于 Surface Cache + 屏幕空间追踪 + Voxel Tracing\n- 可反射屏幕外物体（突破 SSR 限制）\n- 质量高于 SSR，但更贵\n- PC/主机默认 Lumen，移动端不支持\n\n**Ray Traced Reflection（RT 反射）**：\n- UE5 支持 DXR/RTX 硬件光追\n- 真实光线追踪，无 SSR 限制\n- 反射屏幕外、背对面物体\n- 质量最高，但需 RT 显卡（RTX20+/RX6000+）\n- 性能开销大，通常降分辨率采样 + DLSS/FSR 补偿\n\n**三种反射对比**：\n| 方案 | 质量 | 性能 | 限制 |\n| Reflection Capture | 中 | 低 | 烘焙，静态 |\n| SSR | 中高 | 中 | 只反射屏幕内 |\n| Lumen Reflection | 高 | 中高 | PC/主机 |\n| Ray Traced Reflection | 最高 | 高 | 需 RT 硬件 |\n\n**Fallback 链**：RT Reflection → Lumen Reflection → SSR → Reflection Capture → Sky Light\n\n**性能优化**：限制 SSR 距离（远处用 Reflection Capture）；半分辨率 SSR（r.SSR.HalfResSceneColor=1）；粗糙度阈值（Max Roughness < 0.5 才走 SSR）；移动端关闭（r.SSR.Quality=0）\n\n**面试加分点**：Lumen Reflection 的 Surface Cache 把场景表面光照缓存，加速反射查询；RT Reflection + DLSS 降采样 + DLSS 恢复；SSR 的 Hi-Z 层次深度缓冲加速 ray march。",
+    "tags": [
+      "SSR",
+      "反射",
+      "Lumen",
+      "RayTracing"
+    ]
+  },
+  {
+    "id": "shader-059",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "扫描线/雷达扫描 Shader 怎么写？",
+    "answer": "雷达扫描核心：一条从中心旋转的扫描线，扫过的物体短暂高亮。\n\n**扫描线**（屏幕空间或物体空间）：\n```\n// 物体空间，以中心为原点\nfloat2 d = uv - 0.5;\nfloat angle = atan2(d.y, d.x);           // [-π, π]\nfloat sweep = _Time.y * _Speed % 6.28;    // 旋转角度\nfloat diff = abs(angle - sweep);\ndiff = min(diff, 6.28 - diff);            // 角度差\nfloat line = smoothstep(_Width, 0, diff); // 线宽内高亮\ncol += line * _SweepColor;\n```\n\n**扫过痕迹**：\n- 用一个 RenderTexture 记录扫描角度，每帧角度推进时画一道，旧痕迹按时间衰减。\n- 或在 shader 里用 \"角度差 < 衰减阈值\" 模拟拖尾：\n```\nfloat trail = smoothstep(_FadeAngle, 0, diff) * _TrailStrength;\n```\n\n**配合物体高亮**：\n- 物体在扫描线经过时（角度匹配）渲染为高亮色，否则正常。\n- 可用 Stencil 或全局 uniform 传递扫描角度。\n\n扩展：圆形雷达外圈渐变、网格线、坐标刻度。",
+    "tags": [
+      "扫描线",
+      "雷达",
+      "Shader"
+    ]
+  },
+  {
+    "id": "shader-060",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "冰霜/积雪覆盖 Shader 怎么实现？",
+    "answer": "积雪核心：根据法线朝向（朝上）和噪声决定积雪范围。\n\n```\n// 朝上程度\nfloat upness = saturate(dot(worldNormal, float3(0,1,0)));\n// 噪声扰动边界\nfloat noise = tex2D(_Noise, uv * _NoiseTiling).r;\nfloat snowMask = smoothstep(_SnowThreshold, _SnowThreshold + _EdgeWidth, upness + noise * _NoiseStrength);\n\n// 混合\ncol = lerp(baseColor, _SnowColor, snowMask);\n// 积雪处法线也变平滑（朝上）\nnormal = lerp(normal, float3(0,1,0), snowMask);\n// 边缘亮边（可选）\nfloat edge = smoothstep(_SnowThreshold, _SnowThreshold + _EdgeWidth, upness) - snowMask;\ncol += edge * _EdgeGlow;\n```\n\n冰霜变体：\n- 法线贴图叠冰晶裂纹。\n- 半透明 + 折射（玻璃冰）。\n- 边缘 Fresnel 发蓝光。\n- 时间动画：积雪融化（阈值随时间升高）。\n\n要点：法线朝上检测在 Y 轴，旋转物体需转世界法线；噪声让边界自然不平板。",
+    "tags": [
+      "积雪",
+      "冰霜",
+      "Shader"
+    ]
+  },
+  {
+    "id": "shader-061",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "流光/能量通道 Shader 怎么实现？",
+    "answer": "流光效果：一道亮带沿 UV 方向流动，常用于装备、UI 边框、能量条。\n\n```\n// UV 流动\nfloat2 flowUV = uv;\nflowUV.x += _Time.y * _Speed;\n\n// 亮带：用余弦或一维渐变\nfloat band = sin(flowUV.x * _Freq);\nband = pow(saturate(band), _Sharpness);  // 锐化成窄带\n\n// 噪声扰动边界（可选）\nfloat noise = tex2D(_Noise, flowUV * _NoiseTiling).r;\nband *= noise;\n\ncol += band * _FlowColor * _Intensity;\n```\n\n变体：\n- 双向流光（两道相反方向）。\n- 沿路径流光：用顶点色或 UV2 存路径参数，shader 按路径推进。\n- 能量充能：流光强度随充能值升高，充满时整体发光。\n- 颜色渐变：用 Ramp 贴图让流光颜色随位置变化。\n\n配置：\n- 加法混合发光：`Blend One One`，配合 Bloom 出彩。\n- 主体保留原材质，流光叠 Emission。\n\n性能：sin + pow 一次，极廉价，移动端无压力。",
+    "tags": [
+      "流光",
+      "能量",
+      "Shader"
+    ]
+  },
+  {
+    "id": "shader-062",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "移动端 Shader 的核心限制有哪些？",
+    "answer": "移动 GPU 限制：\n\n**1. ALU（算术）**\n- 移动 GPU 算力有限，片元 shader 指令数建议 <300。\n- 数学函数（sin/pow/log）慎用。\n\n**2. 带宽**\n- 移动显存带宽是 PC 的 1/10，纹理采样、全屏后处理是瓶颈。\n- 单 shader 采样建议 ≤4。\n- TBR 架构下，频繁切换 render target 代价高。\n\n**3. 填充率 / Overdraw**\n- 透明物体 overdraw 杀手。\n- 全屏后处理层数要控制。\n\n**4. 精度**\n- half 是原生，float 要拆。\n- 大世界坐标 half 会溢出。\n\n**5. 纹理压缩**\n- ASTC，不能用 BC7。\n- 法线用 BC5（PC）→ ASTC 6x6（移动）。\n\n**6. 特性**\n- 无 Tessellation、无 Geometry Shader（多数）。\n- Compute Shader 支持参差（A12+/中高端安卓）。\n- 全屏 SceneTexture 抓屏代价高（移动端 TBR 下切 RT 贵），需用 Separate Translucency / 降分辨率后处理代替。\n- RT 光追不支持。\n\n配置：shader LOD 分级、关闭阴影/光照降级、简化 PBR。",
+    "tags": [
+      "移动端",
+      "限制",
+      "Shader"
+    ]
+  },
+  {
+    "id": "shader-063",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "为什么移动端慎用全屏后处理和屏幕抓取？UE5 移动端有哪些替代方案？",
+    "answer": "**移动端慎用全屏操作的原因**：\n\n**1. Tile-Based GPU 架构**：移动端 GPU（Mali/Adreno/PowerVR）是 Tile-Based / TBR，屏幕分小块（Tile）渲染，每块在片上 SRAM 处理。全屏操作（PostProcess/SceneColor 采样）破坏 Tile 局部性，需要把 Tile 数据写回显存再读，带宽爆炸\n\n**2. 带宽是移动端瓶颈**：移动端内存带宽有限（PC 的 1/3-1/5），全屏采样 = 分辨率 × 像素 × 采样次数。1080p 全屏单次采样约 8MB 带宽\n\n**3. 功耗与发热**：带宽 = 功耗 = 发热，手机持续高带宽会降频（thermal throttle）\n\n**UE5 移动端慎用的操作**：\n1. **SceneColor 采样（Distortion/折射）**：全屏抓取破坏 TBR。替代：Pixel Normal Offset 或视觉欺骗\n2. **Post Process Material**：全屏 Pass 移动端极贵。替代：材质内置效果（如 Bloom 用 Emissive）\n3. **SSR**：全屏 ray march 移动端关闭。替代：Reflection Capture 或 Planar Reflection\n4. **DOF（景深）**：全屏多次模糊。替代：UI 模拟 DOF 或限制 DOF 区域\n5. **Motion Blur**：全屏 Velocity 采样，移动端通常关闭\n\n**移动端替代方案**：\n1. **视觉欺骗替代真实计算**：Distortion → 粒子贴图模拟；SSR → 静态 Cubemap + 高光贴图；DOF → 远景预模糊贴图\n2. **材质内置效果**：Bloom → Emissive Color + HDR Tone Mapping；描边 → 菲涅尔边缘高亮（非 PPM）\n3. **烘焙替代实时**：GI → Lightmass 烘焙；阴影 → Baked Shadow；反射 → Reflection Capture\n4. **局部 Pass 替代全屏**：描边 → Custom Depth + PPM（只处理标记区域）\n5. **降分辨率**：Post Process 渲染到半分辨率 RT，再 upscale\n\n**UE5 移动端优化 Console Variables**：\n```\nr.SSR.Quality 0                    # 关 SSR\nr.MotionBlurQuality 0              # 关运动模糊\nr.BloomQuality 1                   # 降 Bloom 质量\nr.MobileHDR 0                      # 关 HDR（省带宽）\nr.ShadowQuality 2                  # 降阴影质量\nr.PostProcessQuality 2             # 降后处理质量\n```\n\n**移动端预算建议**：全屏 Pass ≤ 2 个（Bloom + DOF）；SceneColor 采样 0 次；Post Process Material 0（或半分辨率 1 个）；SSR 关闭；Motion Blur 关闭\n\n**面试加分点**：TBR vs IMR（移动端 Tile-Based vs PC Immediate Mode），架构差异导致优化策略不同；Mali 的 AFBC 帧缓冲压缩减少带宽；r.Mobile.UseHWsRGB=1 硬件 sRGB 转换省 shader 开销。",
+    "tags": [
+      "移动端",
+      "后处理",
+      "TBR",
+      "优化"
+    ]
+  },
+  {
+    "id": "shader-064",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "移动端 PBR 该如何简化？",
+    "answer": "简化策略：\n\n**1. 光照简化**\n- 只用主光源（平行光）做 PBR，附加光用 Lambert 或顶点光照。\n- 关闭多光源的 PBR 高光。\n- 阴影只主光投影，附加光不投影。\n\n**2. IBL 简化**\n- 用单个反射探针，不做高粗糙度预滤波（直接采样 mip）。\n- 漫反射用 SH（球谐）环境光，不采样 Cubemap。\n\n**3. 贴图合并**\n- Metallic + AO + Smoothness 打包进 Mask Map（1 张代替 3 张）。\n- 法线贴图压缩用 ASTC 6x6。\n\n**4. 精度**\n- 全 half，只在必要时 float。\n\n**5. 关闭特性**\n- 关 SSR、SSAO、体积光。\n- 关 Clear Coat、次表面散射。\n\n**6. LOD shader**\n- 远距离切简化版 shader（无 PBR，只有 Lambert + 环境光）。\n\n**7. 分级**\n- 高配机开完整 PBR，中配减附加光，低配只主光 Lambert。\n\n实测：移动端简化 PBR 比完整 PBR 快 3-5 倍，视觉差异在手机屏上可接受。",
+    "tags": [
+      "移动端",
+      "PBR",
+      "简化"
+    ]
+  },
+  {
+    "id": "shader-065",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "移动端法线贴图压缩用什么格式？为什么？",
+    "answer": "PC 用 **BC5**（两个通道存 XY，Z 重建），质量高。\n\n移动端用 **ASTC 6×6**（或 5×5 高质量），原因：\n1. 移动 GPU 不支持 BC5（BC 系列是桌面/主机）。\n2. ASTC 是移动标准，压缩比和质量平衡好。\n3. 6×6 block 在质量和大小间最优（2bpp）。\n\n法线贴图压缩注意：\n- 法线是单位向量，Z 可由 `sqrt(1 - x² - y²)` 重建，所以只需存两个通道。\n- 但 UE5 的 DXT5nm 格式存的是 A 和 G 通道（兼容旧硬件），shader 里 `UnpackNormal` 自动处理。\n- ASTC 模式下，建议法线贴图设为 \"Normal map\" 类型，让 UE5 选择合适压缩。\n- 高曲率法线（如角色面部）用 4×4 或 5×5 保质量，平坦表面（地面）用 6×6 或 8×8 省。\n\n错误后果：法线压缩过狠会有色块、光照抖动、表面 \"格纹\"。",
+    "tags": [
+      "法线贴图",
+      "压缩",
+      "ASTC",
+      "移动端"
+    ]
+  },
+  {
+    "id": "shader-066",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "HLSL、GLSL、CG 的关系和区别？UE5 用哪种？跨平台怎么编译？",
+    "answer": "**HLSL / GLSL / CG 对比**：\n\n1. **HLSL（High-Level Shading Language）**：微软为 DirectX 设计，语法接近 C/C++，适用于 Windows/Xbox。Unity 主用（URP/HDRP）、UE5 主用\n2. **GLSL（OpenGL Shading Language）**：OpenGL/OpenGL ES/WebGL 标准，适用于跨平台（Linux/Mac/Mobile/Web）。变体：ESSL（OpenGL ES，移动端）\n3. **CG（C for Graphics）**：NVIDIA 开发，已废弃，曾跨平台编译成 HLSL 或 GLSL，Unity 旧版用\n\n**UE5 用的 Shader 语言**：\n\n**主语言：HLSL**\n- UE5 Material Editor 生成 HLSL\n- Custom node 写 HLSL\n- 引擎 Shader 文件（.usf / .ush）是 HLSL\n\n**跨平台编译流程**：\n```\nHLSL（源）\n  ↓ HLSLcc（UE5 的 HLSL 跨编译器）\n  ├→ DXBC / DXIL（Windows DX11/DX12）\n  ├→ SPIR-V → Vulkan（Windows/Android/Linux）\n  ├→ GLSL / ESSL（OpenGL/OpenGL ES）\n  ├→ MSL（Metal，iOS/macOS）\n  └→ Proprietary（PS5/XSX）\n```\n\n**HLSLcc**：UE5 的 HLSL 跨编译器，把 HLSL 转成各平台目标语言，保证跨平台一致性\n\n**UE5 Shader 文件类型**：.usf（Unreal Shader File）顶点/像素 Shader 实现；.ush（Unreal Shader Header）头文件。路径：Engine/Shaders/ 或项目 Shaders/\n\n**跨平台注意**：\n1. 内置函数差异：HLSL mul(M, v) vs GLSL v * M（矩阵乘法顺序不同）\n2. 精度限定符：HLSL half/float vs GLSL lowp/mediump/highp，UE5 自动处理\n3. 纹理绑定：HLSL Texture2D + SamplerState vs GLSL sampler2D，UE5 用 Texture2DSampler 封装\n\n**Feature Level 对应**：\n| UE5 Feature Level | 目标 |\n| ES3.1 | OpenGL ES 3.1 / Metal ES / Vulkan ES |\n| SM5 | DirectX 11 / Vulkan / Metal |\n| SM6 | DirectX 12（需 DXC 编译器） |\n\n**HLSL vs GLSL 语法差异**：\n| 特性 | HLSL | GLSL |\n| 入口 | VSMain / PSMain | main() |\n| 矩阵乘法 | mul(M, v) | v * M |\n| 矩阵布局 | 行主序 | 列主序 |\n| 纹理采样 | tex.Sample(sampler, uv) | texture(sampler, uv) |\n| 精度 | half/float | mediump/highp |\n\n**面试加分点**：DXC vs FXC（SM6 用 DXC/LLVM，SM5 用 FXC，DXC 支持 Wave Intrinsic）；SPIR-V 是 Vulkan 的中间表示，UE5 通过 HLSL → SPIR-V → Vulkan；Metal 是苹果平台，UE5 通过 HLSL → MSL 转换。",
+    "tags": [
+      "HLSL",
+      "GLSL",
+      "CG",
+      "跨平台",
+      "HLSLcc"
+    ]
+  },
+  {
+    "id": "shader-067",
+    "category": "shader",
+    "difficulty": "中级",
+    "question": "Shader 中的变长循环和动态索引为什么慢？UE5 里怎么避免？",
+    "answer": "**变长循环慢的原因**：\n\n**1. GPU SIMT 架构**：GPU 用 SIMT（Single Instruction Multiple Threads）执行，一个 Warp/Wavefront（32/64 线程）执行相同指令。如果循环次数不同，先完成的线程要等慢的（Warp Divergence）\n\n**2. 分支发散（Branch Divergence）**：\n```hlsl\nfor (int i = 0; i < dynamicCount; i++) {\n    // 不同线程 dynamicCount 不同\n    // 整个 Warp 要执行 max(dynamicCount) 次\n    // 多余的循环只是空转\n}\n```\n性能 = 最坏情况，非平均\n\n**3. 寄存器压力**：循环变量、中间结果占用寄存器，循环次数不确定 → 编译器保守分配寄存器，寄存器不够 → 溢出到显存（极慢）\n\n**4. 无法展开优化**：固定次数循环可展开（unroll），消除循环开销；变长循环无法展开\n\n**动态索引慢的原因**：\n1. 纹理采样动态索引：GPU 纹理采样器要预取，动态索引破坏预取\n2. 数组动态索引：可能导致 local memory 访问（慢）\n\n**UE5 里的避免策略**：\n1. **固定循环次数**：for (int i = 0; i < 4; i++) 编译器可展开\n2. **用 StaticSwitch 替代运行时分支**：StaticSwitchParameter 编译期决定\n3. **纹理数组用 Texture2DArray**：硬件支持动态索引，比 texArray[idx] 高效\n4. **避免数组，用纹理**：把数据存纹理，采样\n5. **循环展开 [unroll]**：Custom node 里 [unroll(4)] for (int i = 0; i < 4; i++)\n6. **限制循环次数**：移动端 < 8 次，PC < 32 次\n\n**UE5 节点图的循环**：节点图不支持循环，复杂循环必须用 Custom node。简单重复用节点复制（如 4 次采样 = 4 个 TextureSample）\n\n**常见变长循环场景**：\n1. 多光源（Forward）：UE5 Forward+ 用分簇（Cluster）限制光源数；Deferred 在 Lighting Pass 统一处理\n2. Ray March（体积云/雾）：固定 maxSteps，限制上限，用 early exit\n3. 阴影采样（PCF）：固定 kernelSize（如 3x3 / 5x5），用 Poisson Disk 采样减少次数\n\n**面试加分点**：Warp Divergence 是 GPU SIMT 架构的性能杀手；[loop] vs [unroll] HLSL 循环指令；Texture Array 硬件支持动态索引，比普通数组高效。",
+    "tags": [
+      "循环",
+      "动态索引",
+      "性能",
+      "WarpDivergence"
+    ]
+  },
+  {
+    "id": "shader-068",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "跨平台 Shader 编译？HLSLcc 是什么？",
+    "answer": "UE5 shader 用 HLSL 写，但要跑在 DX（HLSL）、Vulkan（SPIR-V）、Metal（MSL）、OpenGL（GLSL）、GLES（GLSL ES）上。\n\n**HLSLcc** 是 UE5 自研的 HLSL 跨编译器：\n- 输入：UE5 shader 源码（HLSL）。\n- 输出：各平台目标语言。\n- 处理：语义映射、精度转换、内置宏展开、变体生成。\n\n编译流程：\n1. UE5 收集所有变体组合。\n2. HLSLcc 编译每个变体到中间表示（IR）。\n3. 转成目标平台语言（DXBC/SPIR-V/MSL/GLSL）。\n4. 打包进 shader 缓存（.shader 编译产物）。\n\n跨平台坑：\n- 精度：HLSL half 在 GLSL ES 要映射成 mediump，部分老硬件不支持。\n- 纹理格式：sampler 和 texture 在 GLSL 分离，HLSL 合并，HLSLcc 自动处理。\n- 派生指令（ddx/ddy）：部分移动 GPU 行为不一致。\n- 整数运算：GLES 2.0 不支持，要 fallback。\n\n开发者通常无感，但遇到跨平台 shader 行为差异，可看编译后的 GLSL/MSL 排查（Frame Debugger 里可查看）。",
+    "tags": [
+      "HLSLcc",
+      "跨平台",
+      "编译"
+    ]
+  },
+  {
+    "id": "shader-069",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的自动 Instancing 和 Mesh Draw Pipeline 是怎么减少 CPU 开销的？原理是什么？",
+    "answer": "**UE5 Mesh Draw Pipeline**：自动管理 draw call 提交，减少 CPU 开销，类似 Unity SRP Batcher 但更底层、更自动化。\n\n**核心机制**：\n\n**1. 自动 Instancing**：同一材质的相同网格自动实例化，一次 draw call 绘制多个实例。美术无需手动设置\n\n**2. Mesh Draw Commands**：把可见的 Mesh 提取成 Draw Command，按材质/网格排序合并相同材质的 Command，减少 PSO（Pipeline State Object）切换，减少 uniform upload\n\n**3. PSO Cache**：Pipeline State Object 缓存，避免运行时编译 PSO（PSO 编译极慢），预编译常用 PSO 运行时查表\n\n**4. Culling 后合批**：可见性剔除（Frustum/Occlusion）后，对可见 Mesh 按材质排序合批\n\n**Draw Call 提交流程**：\n```\n1. Frustum Cull（视锥剔除）\n2. Occlusion Cull（遮挡剔除）\n3. 按材质排序可见 Mesh\n4. 合并相同材质 → Instancing\n5. 生成 Mesh Draw Command\n6. 查 PSO Cache\n7. Upload uniform（材质参数）\n8. 提交 GPU draw call\n```\n\n**和 Unity SRP Batcher 的对比**：\n| Unity SRP Batcher | UE5 Mesh Draw Pipeline |\n| 相同 Shader 的不同材质合并 | 相同材质的不同网格合并 |\n| 减少 uniform upload | 减少 draw call + uniform upload |\n| 需手动设置 | 自动（引擎默认） |\n| 不支持 GPU Instancing | 支持 GPU Instancing |\n\n**关键差异**：Unity SRP Batcher 合并相同 Shader 的不同 Material（减少 CBUFFER 切换）；UE5 自动 Instancing + 材质排序，减少 draw call 数量\n\n**MID（Material Instance Dynamic）的作用**：MID 是 Parent Material 的轻量实例，改 MID 参数不触发 Shader 重编译，多个 MID 共享 Parent Shader。配合 Instancing，实现\"一个 Shader + 多个 MID 参数\"的高效模式\n\n**手动优化（TA 仍需做）**：\n1. 减少材质数：合并相似材质，用 MID 变体\n2. LOD：远 LOD 简化材质\n3. Static Mesh 合并：Merge Actors 工具\n4. HLOD（Hierarchical LOD）：远处合并成一个大 Mesh\n5. Impostor（贴片）：超远用 billboard\n6. Nanite：虚拟几何体，自动 LOD\n\n**性能分析工具**：stat scenerendering（DrawCalls/Triangles/Instances）；stat gpu（GPU 帧时间）；ProfileGPU（GPU Pass 明细）；RenderDoc 抓帧分析\n\n**和 Unity MaterialPropertyBlock 的对比**：Unity 用 MPB 避免 new Material 但破坏 SRP Batcher；UE5 用 MID 原生支持，不破坏 Instancing\n\n**面试加分点**：PSO Cache 预热（r.ShaderPipelineCache 预编译 PSO 避免运行时卡顿）；Nanite 用 Mesh Shader 绕过传统 draw call，百万三角形一个 draw call；Instance Count 统计（stat scenerendering 看 InstancedStaticMesh 实例数）。",
+    "tags": [
+      "Instancing",
+      "MeshDrawPipeline",
+      "MID",
+      "CPU优化"
+    ]
+  },
+  {
+    "id": "shader-070",
+    "category": "shader",
+    "difficulty": "高级",
+    "question": "UE5 的 Material Instance Dynamic（MID）是什么？为什么用它而不直接改 Material？",
+    "answer": "**MID（Material Instance Dynamic）**：运行时材质实例，基于 Parent Material 创建，可动态修改参数，不触发 Shader 重编译。\n\n**和直接改 Material 的区别**：\n\n**直接改 Material 的问题**：\n1. 触发 Shader 重编译：改 Material 参数可能触发 Shader 重新编译（秒级卡顿）\n2. 影响所有引用：一个 Material 被多个 Mesh 引用，改一处全变\n3. 不可运行时创建：Material 是资产，运行时不能 new\n4. 破坏 Instancing：不同参数的 Material 是不同 draw call\n\n**MID 的优势**：\n1. 不触发重编译：MID 只改参数 uniform，Shader 已编译\n2. 独立实例：每个 Mesh 可有独立 MID，互不影响\n3. 运行时创建：C++/Blueprint 可动态创建 MID\n4. 保持 Instancing：多个 MID 共享 Parent Shader，仍可 Instancing\n\n**MID vs MIC**：\n| 特性 | MID（Dynamic） | MIC（Constant） |\n| 创建时机 | 运行时 | 编辑器 |\n| 参数修改 | 运行时可改 | 编辑器预设，运行时不可改 |\n| 性能 | 略低于 MIC（动态 upload） | 最优（静态） |\n| 用途 | 动态参数（血条/变色） | 静态变体（不同颜色墙） |\n\n**创建 MID**：\n```cpp\nUMaterialInstanceDynamic* MID = MeshComp->CreateAndSetMaterialInstanceDynamic(0);\nMID->SetScalarParameterValue(FName(\"Roughness\"), 0.5f);\nMID->SetVectorParameterValue(FName(\"BaseColor\"), FLinearColor::Red);\nMID->SetTextureParameterValue(FName(\"MainTex\"), MyTexture);\n```\n\n**典型应用场景**：\n1. 角色换装/涂装：MID 切换 Base Color / Pattern Texture\n2. 武器皮肤/特效变色：MID 改 Emissive Color / Tint\n3. 环境交互：物体受击变色（HitFlash），MID 临时改 Emissive\n4. 昼夜变化：配合 Material Parameter Collection 全局控制\n5. UI 动态材质：UMG 材质动态参数（进度条/特效）\n\n**性能注意**：\n1. MID 不是免费：每个 MID 有 uniform upload 开销，大量 MID（> 1000）可能 CPU 瓶颈\n2. MID 与 Instancing：多个 MID 共享 Parent Shader 仍可 Instancing，但不同 MID 参数 → 不同 uniform → 可能拆分实例\n3. MID 参数缓存：UE5 缓存 MID 参数只在变化时 upload，频繁改参数（每帧）会增加 upload 开销\n\n**和 Unity MaterialPropertyBlock 的对比**：\n| Unity MPB | UE5 MID |\n| 避免 new Material 开销 | MID 本身轻量 |\n| 可能破坏 SRP Batcher | 不破坏 Instancing |\n| 改 Renderer 的参数 | 改 Material 实例 |\n| 不支持纹理参数 | 支持所有参数类型 |\n\n**关键差异**：Unity MPB 是 Renderer 的附加属性，不创建新 Material；UE5 MID 是独立的 Material 实例，挂在 Mesh Component 上。UE5 鼓励用 MID，是原生模式\n\n**Material Parameter Collection（全局参数）**：UMaterialParameterCollection 资产，全局 scalar/vector 参数集，所有材质共享，适合全局风控（风强/时间/天气），比 per-MID 更高效\n\n**面试加分点**：MID 的 Parent 必须是已编译 Material（MID 不编译 Shader，依赖 Parent）；MID 不能改 Shading Model / Blend Mode（这些是编译期决定）；StaticSwitch 是编译期，MID 无法切换，用 StaticSwitchParameter 需重新编译。",
+    "tags": [
+      "MID",
+      "MaterialInstance",
+      "参数",
+      "运行时"
+    ]
+  }
+]

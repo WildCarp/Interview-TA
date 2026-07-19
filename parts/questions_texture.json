@@ -1,0 +1,265 @@
+{
+  "category": "texture",
+  "questions": [
+    {
+      "id": "texture_001",
+      "category": "texture",
+      "difficulty": "easy",
+      "question": "贴图压缩格式为什么必要？为什么不直接用 PNG/JPG？",
+      "answer": "**为什么压缩**：\n\n1. **内存**：未压缩 RGBA 32bit 4K 贴图 = 4096×4096×4 = 67MB，10 张就 670MB\n2. **采样带宽**：未压缩贴图从显存读取慢，GPU 等待\n3. **包体**：移动端包体限制严格\n\n**为什么不直接用 PNG/JPG**：\n- PNG/JPG 是**文件级压缩**，加载到内存必须解压成原始像素\n- 即磁盘小，但内存里仍是未压缩（巨大）\n- 而且 JPG 有损，不能用于法线贴图\n\n**GPU 压缩格式**：\n- 块压缩（Block Compression），固定压缩比\n- GPU 硬件解码，直接采样不解压\n- 内存占用 = 原始 / 压缩比\n\n**典型对比**（4K 贴图）：\n\n| 格式 | 内存 | 备注 |\n|------|------|------|\n| RGBA32 | 67MB | 未压缩 |\n| BC7 | 11MB | PC 高质量 |\n| ASTC 6×6 | 2.9MB | 移动高质量 |\n| ASTC 8×8 | 1.6MB | 移动中质量 |\n| ETC2 | 5.6MB | Android 兼容 |\n| PNG | 磁盘小，内存仍 67MB | 不行 |",
+      "tags": [
+        "压缩",
+        "BC7",
+        "ASTC",
+        "GPU"
+      ]
+    },
+    {
+      "id": "texture_002",
+      "category": "texture",
+      "difficulty": "easy",
+      "question": "PC、移动、主机三大平台分别用什么压缩格式？",
+      "answer": "**PC（DirectX / Vulkan）**：\n- **BC7**：彩色贴图（albedo、color），8bit/block，质量最高\n- **BC5**：法线贴图（双通道，XY），高质量\n- **BC4**：单通道（roughness、AO、metallic），省内存\n- **BC3**：旧版带 alpha，BC7 替代\n- **BC1**：旧版彩色，无 alpha，已被 BC7 替代\n\n**移动（OpenGL ES / Vulkan）**：\n- **ASTC**（Adaptive Scalable Texture Compression）：\n  - 块大小可调：4×4（高质量）到 12×12（低质量）\n  - 6×6 默认推荐（质量/体积平衡）\n  - 4×4 用于 UI（清晰度要求高）\n  - 8×8 用于小贴图（如细节贴图）\n- **ETC2**：Android 兼容兜底（API 21+ 强制支持），质量一般\n- **PVRTC**：iOS 旧设备（iPhone 5s 之前），已淘汰\n\n**主机（PS5/XSX）**：\n- BC7 / BC5 / BC4（与 PC 同）\n- 纹理流式加载（Oodle Texture 压缩）\n\n**默认推荐**：\n- PC：BC7 + BC5 + BC4\n- 移动：ASTC 6×6（albedo/normal）+ ASTC 8×8（mask/AO）+ ASTC 4×4（UI）",
+      "tags": [
+        "压缩",
+        "BC7",
+        "ASTC",
+        "ETC2",
+        "PVRTC"
+      ]
+    },
+    {
+      "id": "texture_003",
+      "category": "texture",
+      "difficulty": "easy",
+      "question": "什么是 mipmap？为什么 UI 贴图要关掉？",
+      "answer": "**mipmap**：贴图的多级渐缩版本。\n\n- 原图 1024×1024 → 512 → 256 → 128 → 64 → 32 → 16 → 8 → 4 → 2 → 1\n- 共 11 级，总内存增加约 33%（1 + 1/4 + 1/16 + ... = 4/3）\n- 渲染远处物体时用低分辨率版本，省带宽 + 抗锯齿\n\n**为什么 UI 要关**：\n\n1. **永远 1:1 显示**：UI 几乎不会被缩到很小，不需要 mipmap\n2. **内存浪费**：UI 一般是全屏 atlas，加 mip 多 33% 内存\n3. **采样错误**：UI 一般是 Sprite，GPU 自动选 mip 时可能选错级别，导致 UI 模糊\n4. **避免边缘渗色**：透明边缘的 UI 在 mip 下采到透明像素周围颜色，alpha 边缘变脏\n\n**例外**：\n- 世界空间 UI（如 3D 场景里的招牌）要开 mipmap\n- UI 用作贴花 / Decal 时要开\n\n**通用规则**：\n- UI / Icon / 字体：关 mipmap\n- 世界贴图（albedo、normal、roughness）：开 mipmap\n- 天空盒：开 mipmap（用于粗糙度 IBL）",
+      "tags": [
+        "mipmap",
+        "UI",
+        "贴图"
+      ]
+    },
+    {
+      "id": "texture_004",
+      "category": "texture",
+      "difficulty": "easy",
+      "question": "sRGB 和 Linear 贴图有什么区别？哪些贴图该用 sRGB？",
+      "answer": "**sRGB vs Linear**：\n\n- **sRGB**：非线性色彩空间，gamma ≈ 2.2，给人眼感觉更均匀\n- **Linear**：线性色彩空间，物理正确的光照计算需要\n\n**渲染管线**：\n- 引擎在 Linear 空间做光照计算\n- 输入 sRGB 贴图时自动转换到 Linear\n- 输出时再转回 sRGB 给显示器\n\n**哪些贴图用 sRGB**：\n- **Albedo / Base Color**：颜色数据，作者在 sRGB 下画\n- **Emissive**：自发光颜色\n- **UI / Sprite**：UI 贴图\n- **Lightmap**：烘焙的颜色贴图\n\n**哪些贴图用 Linear**：\n- **Normal Map**：法线向量，不是颜色\n- **Roughness / Metallic / AO**：数据贴图，线性数值\n- **Mask Map**：掩码数据\n- **Height Map**：高度数据\n- **Bent Normal / Detail Map**：技术数据\n\n**常见错误**：\n- 法线贴图勾了 sRGB → 法线错误，光照偏色\n- Roughness 没勾 Linear → 表面粗糙度失真\n- 反射探针 / 立方体贴图：HDR 用 Linear，LDR 用 sRGB",
+      "tags": [
+        "sRGB",
+        "Linear",
+        "色彩空间",
+        "PBR"
+      ]
+    },
+    {
+      "id": "texture_005",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "PBR 贴图有哪些通道？UE5 中怎么打包能省内存？",
+      "answer": "**标准 PBR 贴图**：\n\n1. **Albedo / Base Color**（sRGB）\n2. **Normal**（Linear，XY 两通道，Z 可计算）\n3. **Metallic**（Linear，单通道）\n4. **Roughness**（Linear，单通道）\n5. **AO**（Ambient Occlusion，Linear，单通道）\n6. **Height**（可选，Linear，单通道）\n7. **Emissive**（sRGB，颜色）\n\n**通道打包**：把多个单通道贴图合并到一张 RGBA 贴图里。\n\n**UE5 默认打包方案 ORM**：\n\n| 通道 | 数据 | 说明 |\n|------|------|------|\n| R | Occlusion (AO) | 环境光遮蔽 |\n| G | Roughness | 粗糙度 |\n| B | Metallic | 金属度 |\n| A | 空闲 / 自定义 | 可放 Height 或不用 |\n\n**UE5 Material 配置**：\n- Material Editor 里用 Texture Sample 节点采样 ORM 贴图\n- 拆分 R/G/B 通道分别连到 AO / Roughness / Metallic 输入\n- 或用 Material Function 封装，多个材质复用\n\n**好处**：\n- 一张 RGBA 贴图代替 3-4 张单通道，省内存 75%\n- 减少采样次数（一次采样拿所有数据）\n- 减少 Texture Sample 节点，材质图更简洁\n\n**注意**：\n- 打包到同一张的贴图必须**分辨率需求相同**\n- Metallic 和 AO 同级合理，但 Detail Map 可能需要更高分辨率，要权衡\n- 通道顺序要和 Material 配置匹配，否则美术调材质会乱\n- ORM 贴图必须用 **Linear**（sRGB 关闭）\n\n**和 Unity 对比**：Unity URP 用 Mask Map（R=Metallic, A=Smoothness，Smoothness=1-Roughness 需反转）；UE5 用 ORM（R=AO, G=Roughness, B=Metallic），不需要反转，更直观。\n\n**面试加分点**：能说出 UE5 的 `Texture CompressionSettings = TC_Masks` 适合 ORM 贴图（每通道独立压缩），以及 `sRGB = false` 是数据贴图的硬性要求。",
+      "tags": [
+        "PBR",
+        "通道打包",
+        "ORM",
+        "UE5",
+        "优化"
+      ]
+    },
+    {
+      "id": "texture_006",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "ASTC 压缩格式有几个块大小？怎么选？",
+      "answer": "**ASTC 块大小**：从 4×4 到 12×12，共 10 档。\n\n每个块固定 128 bit，所以块越大压缩比越高、质量越低：\n\n| 块大小 | 每像素 bit | 4K 占用 | 质量 | 用途 |\n--------|-----------|---------|------|------|\n| 4×4 | 8 bpp | 16MB | 极高 | UI、人脸特写 |\n| 5×5 | 5.12 bpp | 10MB | 很高 | 重要角色 albedo |\n| 6×6 | 3.56 bpp | 2.9MB（2K） / 11MB（4K） | 高 | 默认推荐 |\n| 8×8 | 2 bpp | 6MB（4K） | 中 | mask、roughness |\n| 10×10 | 1.28 bpp | 3.8MB（4K） | 中低 | 细节贴图 |\n| 12×12 | 0.89 bpp | 2.7MB（4K） | 低 | 远景、天空盒 |\n\n**选型建议**：\n\n- **UI / 字体**：4×4（清晰度要求高）\n- **角色 albedo**：5×5 或 6×6\n- **环境 albedo**：6×6\n- **法线贴图**：6×6（法线对压缩敏感，不要降级）\n- **mask / roughness / AO**：8×8（数据贴图，容差大）\n- **细节贴图（detail map）**：8×8 或 10×10\n- **天空盒（cubemap）**：6×6（每面）\n- **远景 / 远距离纹理**：10×10 或 12×12\n\n**注意**：\n- 法线贴图用 ASTC 时勾选 \"Normal Map\" 选项，引擎会用专门的法线压缩算法\n- ASTC 支持透明通道（RGBA），但 alpha 通道质量会下降",
+      "tags": [
+        "ASTC",
+        "压缩",
+        "块大小",
+        "移动"
+      ]
+    },
+    {
+      "id": "texture_007",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "贴图的 anisotropic filtering（各向异性过滤）什么时候开？",
+      "answer": "**各向异性过滤**：当贴图以斜角被采样时（如地面、墙面），提高远处清晰度。\n\n**问题**：\n- 普通 mipmap + 双线性/三线性过滤，斜视角下远处会过度模糊\n- 各向异性过滤沿主方向多次采样，保留细节\n\n**适用场景**：\n- **地面 / 墙面贴图**：典型受益\n- **天空盒**：远处需要清晰\n- **路面、铁轨**：透视斜角明显\n- **水面反射**：折射贴图斜视角\n\n**不适用**：\n- UI（永远 1:1）\n- 角色贴图（一般是正面观察）\n- 法线贴图（角度对法线影响小）\n\n**性能开销**：\n- 现代 GPU 各向异性过滤几乎免费（硬件加速）\n- 但采样次数增加，移动端低端设备仍要注意\n- 推荐级别：2x 或 4x，8x/16x 收益递减\n\n**UE5 设置**：\n- 贴图 Inspector → Aniso Level（0-16）\n- 全局 Quality Setting 里有上限\n- 推荐：地面贴图 8x，普通 2x",
+      "tags": [
+        "各向异性",
+        "过滤",
+        "采样"
+      ]
+    },
+    {
+      "id": "texture_008",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "什么是 Sprite Atlas / 纹理图集？UE5 里怎么用？",
+      "answer": "**Sprite Atlas / 纹理图集**：把多个小图合并到一张大贴图（atlas）里。\n\n**好处**：\n1. **减少 Draw Call**：同一 atlas 的 Sprite 可被 ISM 批量绘制\n2. **减少材质**：一张 Material 搞定\n3. **内存更紧凑**：避免每张小贴图的开销（mip padding、对齐）\n\n**UE5 实现**：\n\nUE5 2D 用 **Paper2D** 体系，UI 用 **UMG（Canvas Panel）**。替代 Unity SpriteAtlas。\n\n**1. Paper2D Sprite**：\n- 导入贴图时选 `Texture Sprite` 类型生成 `Paper2D Sprite`\n- 多个 Sprite 可引用同一张 atlas 贴图\n- `Sprite Atlas Group`（Paper2D）自动打包\n\n**2. UMG Canvas Panel**：\n- UI 元素用 `Image` 控件，引用同一张贴图的不同区域\n- UMG 自动 batch 同贴图的元素\n- 替代 Unity UGUI Canvas\n\n**3. Python 脚本批量创建 Sprite**：\n```python\nimport unreal\n# 从大图切 Sprite\ntexture = unreal.load_asset('/Game/UI/Atlas_Tileset')\nsprite_factory = unreal.SpriteFactory()\nsprite_factory.initial_texture = texture\nsprite = sprite_factory.factory_create_sprite(texture, ...)\n```\n\n**4. Texture Packer / ShoeBox**：\n- 外部工具打包 atlas\n- 导入 UE5 后用 Paper2D 切片\n\n**注意点**：\n- **MipMap**：UI atlas 关闭，世界 sprite atlas 开启\n- **图集大小**：建议 2048×2048 或 4096×4096，过大导致单次加载卡顿\n- **分类打包**：按 UI 页面分类（login_atlas、lobby_atlas），按功能分类（icon_atlas）\n- **Sprite Border**：设置九宫格拉伸区域\n- **像素对齐**：2D 游戏用 `Pixel Snapping` 避免边缘渗色\n\n**坑**：\n- 大量 Sprite 同帧加载 atlas 时会卡顿，预热（`LoadAsset` 预加载）\n- 图集更新导致运行时引用失效（用 Sprite 名字而非硬引用）\n- UE5 Paper2D 功能不如 Unity Sprite 强大，复杂 2D 需 Spine 插件\n\n**和 Unity 对比**：Unity 有原生 SpriteAtlas API（C#）；UE5 用 Paper2D + UMG，2D 工具链较弱，但 UI 用 UMG Canvas Panel 天然 batch。\n\n**面试加分点**：能说出 UMG 的 `RetainerBox` 做缓存渲染减开销，以及 Paper2D 的 `Sprite Atlas Group` 自动打包机制。",
+      "tags": [
+        "SpriteAtlas",
+        "Paper2D",
+        "UMG",
+        "图集",
+        "UE5"
+      ]
+    },
+    {
+      "id": "texture_009",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "什么是 Texture Streaming（贴图流式加载）？UE5 怎么开？",
+      "answer": "**Texture Streaming**：根据摄像机距离动态加载不同 mipmap 级别，省内存。\n\n**原理**：\n- 场景里所有贴图同时加载完整 mipmap 链很费内存\n- 只加载当前视野内可见物体的高分辨率 mip\n- 远处物体只用低 mip，按需加载高 mip\n\n**UE5 开启**：\n\n```\nQuality Settings → Texture Streaming → 勾选\n  Memory Budget: 默认 128MB（推荐调到 256-512MB）\n  Automatic Streaming: 默认开\n```\n\n**每张贴图配置**：\n- Texture Importer → Streaming Mipmaps: 勾选\n- Priority：数值越大优先级越低（如 UI 给 -100，背景给 100）\n\n**适用**：\n- 大场景开放世界（贴图量巨大）\n- 玩家不可能瞬间看到的远处贴图\n\n**不适用**：\n- UI（永远全分辨率）\n- 角色（玩家随时切镜头看）\n- 法线贴图（降级会破坏光照）\n\n**坑**：\n- 玩家快速移动时可能出现贴图 \"弹出\"（pop-in），低 mip 突然变高 mip\n- 内存预算太小 → 频繁切换贴图，性能反而下降\n- 监控：用 Memory Profiler 看 Texture Streaming 实际占用",
+      "tags": [
+        "TextureStreaming",
+        "UE5",
+        "内存",
+        "优化"
+      ]
+    },
+    {
+      "id": "texture_010",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "贴图的 Read/Write 选项什么时候开？为什么默认该关？",
+      "answer": "**Read/Write Enabled**：贴图是否可在 CPU 端读取像素。\n\n**默认该关**：\n- 开启后，贴图在系统内存（CPU 可访问）和显存（GPU 可访问）各存一份，**内存翻倍**\n- 4K 贴图 BC7 = 11MB（GPU）+ 11MB（CPU）= 22MB\n- 大量贴图同时 Read/Write 会导致内存爆炸\n\n**什么时候开**：\n\n1. **需要 GetPixels / SetPixels**：\n   - 运行时动态修改贴图（如涂鸦、地形 deformation）\n   - 截屏 / Readback\n\n2. **需要 Texture2D.EncodeToPNG/JPG**：\n   - 截图保存\n   - 用户上传图片处理\n\n3. **CPU 端读像素做逻辑判断**：\n   - 如读取高度图判断游戏逻辑\n\n**优化替代方案**：\n\n- **不需要 CPU 访问的，默认关 Read/Write**\n- 必须读像素时，用 `AsyncGPUReadback`：\n  - 异步从 GPU 读，不阻塞主线程\n  - 不需要常驻 CPU 副本\n  - 推荐 UE5 2018+ 使用\n\n```csharp\n// 推荐：异步读回\nAsyncGPUReadback.Request(texture, 0, request => {\n    if (!request.hasError)\n    {\n        var data = request.GetData<Color32>();\n        // 处理像素\n    }\n});\n```\n\n**审查**：CI 脚本扫描所有贴图，标记开启 Read/Write 的，确认是否真的需要。",
+      "tags": [
+        "Read/Write",
+        "内存",
+        "优化",
+        "UE5"
+      ]
+    },
+    {
+      "id": "texture_011",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "贴图的 Max Size 该怎么定？有标准吗？",
+      "answer": "**贴图尺寸标准（按用途）**：\n\n| 资产类型 | 推荐尺寸 | 备注 |\n|---------|---------|------|\n| 主角全身贴图 | 2048×2048 | LOD0 用 |\n| 主角面部 | 1024×1024 | 单独 atlas |\n| 配角/NPC | 1024×1024 | LOD0 |\n| 怪物 | 1024×1024 | LOD0 |\n| 武器/道具（hero） | 1024×1024 | |\n| 普通道具 | 512×512 | |\n| 小道具 | 256×256 | |\n| 建筑墙面 | 1024×1024 | tiling |\n| 地面 tiling | 512×512 | 重复利用 |\n| 天空盒 | 2048×1024 | HDRI 4K-8K |\n| UI 全屏背景 | 2048×2048 | |\n| UI 元素 | 1024×1024 | atlas |\n| Icon | 512×512 或 atlas | |\n| Lightmap | 1024 / 512 | 按 Lightmap 索引 |\n\n**原则**：\n1. **2 的幂次**（POT）：256/512/1024/2048，硬件友好（部分老设备不支持非 POT）\n2. **按屏幕占比**：物体在屏幕上占比越大，贴图分辨率越高\n3. **LOD 配对**：\n   - LOD0：1024\n   - LOD1：512\n   - LOD2：256\n   - LOD3：128\n4. **远景**：可降到 256 或更小\n\n**统一规则**：\n- Import 时按源分辨率，Max Size 在平台 Override 里限制\n- PC 不限制（4096 上限够用）\n- 移动：4096 降到 2048，2048 降到 1024\n- 主机：与 PC 同",
+      "tags": [
+        "贴图尺寸",
+        "MaxSize",
+        "规范"
+      ]
+    },
+    {
+      "id": "texture_012",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "什么是 Cubemap？怎么生成？和 HDRI 有什么区别？",
+      "answer": "**Cubemap**：6 张正方形贴图组成的立方体环境贴图，用于环境反射、IBL、天空盒。\n\n**生成方式**：\n\n1. **DCC 烘焙**：Maya/Blender 渲染 6 个面（+x/-x/+y/-y/+z/-z）\n2. **HDRI 转换**：从一张等距矩形 HDR 图（.hdr/.exr）转 Cubemap\n   - 工具：HDR-to-Cubemap 转换器、Substance Designer、引擎内置\n3. **运行时渲染**：相机 6 面拍场景，生成动态反射（如 Reflection Probe）\n\n**UE5**：\n```csharp\n// 从一张 HDRI 生成 Cubemap\nvar cubemap = new Cubemap(512, TextureFormat.RGBAFloat, false);\n// 或用 RenderTexture.Cubemap\n```\n\n**HDRI vs Cubemap**：\n\n| 维度 | HDRI | Cubemap |\n|------|------|---------|\n| 来源 | 拍摄 / 离线渲染 | HDRI 转换 / 运行时渲染 |\n| 格式 | .hdr / .exr | 6 张 2D 或 .cubemap |\n| 用途 | 源数据 | 运行时采样 |\n| 内存 | 大（全景） | 6 面 |\n| 采样 | 需重映射 | 直接 SAMPLE_CUBEMAP |\n\n**PBR 用法**：\n1. 一张 Cubemap 烘焙成 IBL：\n   - **Irradiance Map**（漫反射环境光）：低分辨率模糊版\n   - **Prefiltered Map**（镜面反射，按 roughness 分级）：mipmap 链\n2. 配合 BRDF LUT（二维查找表）完成 IBL\n\n**优化**：\n- Cubemap 大小：512 或 1024（重要场景 2048）\n- 移动端用 256-512\n- Reflection Probe 用 Cubemap 实时渲染或烘焙",
+      "tags": [
+        "Cubemap",
+        "HDRI",
+        "IBL",
+        "反射"
+      ]
+    },
+    {
+      "id": "texture_013",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "法线贴图为什么是蓝色的？压缩时要注意什么？",
+      "answer": "**为什么蓝色**：\n\n- 切线空间法线贴图：\n  - R = X 方向（左右偏移）\n  - G = Y 方向（上下偏移）\n  - B = Z 方向（向外，朝向相机）\n- 法线一般朝外（+Z），所以 B 通道接近 1\n- 0-255 范围里，B ≈ 200-255，所以整体偏蓝\n\n**法线贴图压缩注意**：\n\n1. **BC5 / ASTC 法线专用格式**：\n   - 只存 RG，B 在 Shader 里计算：B = sqrt(1 - R² - G²)\n   - 双通道压缩质量高\n\n2. **DXT5nm 格式**（老式 UE5）：\n   - R 存 alpha 通道，G 存 G 通道\n   - 兼容 DXT5 压缩\n\n3. **不要勾 sRGB**：\n   - 法线是向量数据，不是颜色\n   - sRGB 会做 gamma 转换，破坏法线\n\n4. **Mipmap 生成要注意**：\n   - 简单降采样会让法线变短（向量平均化）\n   - 引擎需用 \"normalize on generate\" 选项\n   - 手动生成：renormalize 后再压缩\n\n5. **压缩误差容忍**：\n   - 法线对压缩敏感，建议用高质量格式（BC5、ASTC 4×4 / 5×5）\n   - 不要用 BC1 / ETC2（法线会出现块状伪影）\n\n6. **细节法线（Detail Normal）**：\n   - 平铺贴图，单独打包\n   - 用 BC5 或 ASTC 4×4",
+      "tags": [
+        "法线贴图",
+        "压缩",
+        "BC5"
+      ]
+    },
+    {
+      "id": "texture_014",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "什么是 Texture Array？什么时候用？",
+      "answer": "**Texture Array**：一组同尺寸、同格式的 2D 贴图，作为一个资源绑定，Shader 用索引采样。\n\n**特点**：\n- 所有 slice 必须同尺寸、同格式、同 mipmap 数\n- GPU 用 `texture.Sample(sampler, float3(uv, index))` 采样\n- 内存紧凑，无 atlas 边界问题\n\n**用途**：\n\n1. **地形 / Terrain**：\n   - 多层 splat 贴图（草地、石头、土地、雪）\n   - Shader 按权重混合\n   - 比每个 splat 单独采样省 Draw Call\n\n2. **Volume Rendering**：\n   - 3D 体积数据切片\n   - 云、烟雾\n\n3. **2D 动画**：\n   - 角色多个表情 / 动作帧\n   - Sprite 切换不用换贴图\n\n4. **Impostor（billboard）**：\n   - 远景物体的多角度快照\n   - 8 或 16 个方向，存 Texture Array\n\n5. **Catmull-Rom 体积云**：\n   - 多个 noise slice\n\n**UE5**：\n```csharp\nvar texArray = new Texture2DArray(512, 512, 8, TextureFormat.BC7, true);\nfor (int i = 0; i < 8; i++)\n    Graphics.CopyTexture(textures[i], 0, 0, texArray, i, 0);\n```\n\n**限制**：\n- WebGL 1.0 不支持\n- 老旧移动 GPU 可能不支持\n- 最大 slice 数有上限（如 256 或 2048）",
+      "tags": [
+        "TextureArray",
+        "GPU",
+        "地形"
+      ]
+    },
+    {
+      "id": "texture_015",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "什么是 Render Texture？在 TA 工作里怎么用？",
+      "answer": "**Render Texture（RT）**：在 GPU 显存里的可渲染贴图，相机可渲染到它，Shader 可采样它。UE5 里对应 `UTextureRenderTarget2D`。\n\n**用途**：\n\n1. **后处理**：\n   - 主相机渲染到 RT → Post Process Material → 屏幕\n   - Bloom、Blur、Color Grading 等\n\n2. **小地图 / 俯视图**：\n   - 顶部 SceneCapture2D 渲染到 RT → 显示在 UMG Image（用 Brush 绑定 RT）\n   - UE5 的 SceneCaptureComponent2D 比 Unity 额外相机更轻量\n\n3. **反射 / 折射**：\n   - SSR：屏幕空间反射，G-Buffer 计算\n   - 水面反射：SceneCapture2D 镜像渲染到 RT\n   - 折射：Pixel Normal Offset 采样 SceneColor（UE5 用 Separate Translucency + Custom Depth 方案）\n\n4. **CCTV / 监视器**：\n   - 场景里的电视屏幕显示另一个 SceneCapture 画面\n\n5. **动态环境贴图**：\n   - Reflection Capture（球面/方形捕获，实时或烘焙 Cubemap）\n   - Planar Reflection（平面反射组件，实时高质量）\n\n6. **特效**：\n   - 节奏光波、扫描线\n   - 离屏粒子\n\n**UE5 实现**：\n```cpp\n// C++ 创建 RT\nUTextureRenderTarget2D* RT = NewObject<UTextureRenderTarget2D>();\nRT->InitAutoFormat(1024, 1024);  // 自动选格式\nRT->UpdateResource();\n\n// 绑定到 SceneCapture2D\nSceneCaptureComp->TextureTarget = RT;\n```\n\n**蓝图**：Create Render Target 2D → Scene Capture Component 2D 设 Texture Target → UMG Image 的 Brush 设为 RT。\n\n**坑与优化**：\n\n- **内存**：RT 占用 = 分辨率 × 像素字节，1080p HDR RT ≈ 16MB\n- **重用**：避免每帧 new RT，UE5 内部 `FRenderTargetPool` 自动池化，业务层复用同一 RT 资源即可\n- **Format**：\n  - RTF RGBA8：8bit/channel，普通用\n  - RTF RGBA16f：16bit，HDR\n  - RTF RGBA32f：32bit，超高精度\n- **DepthBuffer**：需要深度时设 24/32bit，否则 0 省内存\n- **Anti-aliasing**：移动端慎用 MSAA RT，性能开销大，用 FXAA/TAA 代替",
+      "tags": [
+        "RenderTexture",
+        "RT",
+        "后处理",
+        "UE5"
+      ]
+    },
+    {
+      "id": "texture_016",
+      "category": "texture",
+      "difficulty": "hard",
+      "question": "贴图内存占用怎么算？给个例子。",
+      "answer": "**通用公式**：\n\n```\n内存 = 宽 × 高 × 每像素 bit / 8\n```\n\n**未压缩格式**：\n\n| 格式 | 每像素 | 2048×2048 | 4096×4096 |\n|------|--------|-----------|-----------|\n| RGBA32（8bit/通道） | 32 bit | 16 MB | 64 MB |\n| RGBA Half（16bit/通道） | 64 bit | 32 MB | 128 MB |\n| RGBA Float（32bit/通道） | 128 bit | 64 MB | 256 MB |\n| R8（单通道） | 8 bit | 4 MB | 16 MB |\n| RG16 | 16 bit | 8 MB | 32 MB |\n\n**压缩格式**（块压缩，固定每块 bit）：\n\n| 格式 | 块大小 | 每像素 | 2048² | 4096² |\n|------|--------|--------|-------|-------|\n| BC1 / BC4 | 4×4 | 4 bpp | 2 MB | 8 MB |\n| BC3 / BC5 / BC6H / BC7 | 4×4 | 8 bpp | 4 MB | 16 MB |\n| ASTC 4×4 | 4×4 | 8 bpp | 4 MB | 16 MB |\n| ASTC 6×6 | 6×6 | 3.56 bpp | 1.8 MB | 7.1 MB |\n| ASTC 8×8 | 8×8 | 2 bpp | 1 MB | 4 MB |\n| ETC2 | 4×4 | 8 bpp（RGB）/ 16 bpp（RGBA） | 4-8 MB | 16-32 MB |\n| PVRTC 4bpp | 4×4 | 4 bpp | 2 MB | 8 MB |\n\n**Mipmap 增量**：1/3（总 = 原始 × 4/3）\n\n**Cubemap**：6 面总和\n\n**例子**：4K BC7 + Mipmap = 16MB × 4/3 ≈ 21.3MB\n\n**Texture3D / Texture2DArray**：\n- 3D：每个 slice 一份\n- Array：slice 数 × 单 slice 内存\n\n**移动端预算参考**：1GB 总内存，贴图占 200-300MB，所以 4K 贴图 ASTC 6×6 ≈ 7MB，能用 30-40 张",
+      "tags": [
+        "内存",
+        "计算",
+        "压缩格式"
+      ]
+    },
+    {
+      "id": "texture_017",
+      "category": "texture",
+      "difficulty": "hard",
+      "question": "贴图的 wrap mode（repeat / clamp / mirror）有什么区别？什么时候用哪个？",
+      "answer": "**Wrap Mode**：UV 超出 [0,1] 范围时的处理方式。\n\n**Repeat（重复）**：\n- UV 取小数部分，无限重复\n- 用于 tiling 贴图（地面、墙面、布料）\n- 适合无缝贴图（seamless texture）\n\n**Clamp（钳制）**：\n- UV 限制在 [0,1]，超出部分用边缘像素\n- 用于非 tiling 贴图（如角色贴图、UI）\n- 防止边缘出现接缝\n- 用于 Lightmap、Reflection Probe 边缘\n\n**Mirror（镜像）**：\n- UV 在 0/1 处镜像翻转\n- 可用于无限平铺但不显重复\n- 适合云层、草地等需要变化的贴图\n\n**Mirror Once**：\n- UV 在 [-1, 1] 范围镜像一次\n- 用于部分特殊场景\n\n**Per-Axis**：\n- U 和 V 可独立设置（如 U=Repeat, V=Clamp）\n- 用于条带状贴图（如草地 blade）\n\n**坑**：\n\n1. **Repeat 贴图边缘渗色**：\n   - 压缩时贴图边缘像素会渗到下一周期\n   - 解决：源贴图加 padding，或用 \"Edge Padding\" 选项\n\n2. **Clamp 边缘伪影**：\n   - 法线贴图用 Clamp 时，边缘法线可能不平滑\n   - 解决：模型 UV 留出血边（bleed）\n\n3. **Lightmap 必须 Clamp**：\n   - Lightmap UV 应在 [0,1]，超出会采样错误\n   - 引擎强制 Clamp\n\n4. **Decal 贴图**：\n   - 一般 Clamp，避免超出模型范围的 Decal 重复",
+      "tags": [
+        "WrapMode",
+        "Repeat",
+        "Clamp",
+        "Mirror"
+      ]
+    },
+    {
+      "id": "texture_018",
+      "category": "texture",
+      "difficulty": "medium",
+      "question": "Substance Painter 导出的贴图怎么对应到 UE5 材质？",
+      "answer": "**SP Export Preset**：按 UE5 命名导出贴图。\n\n**UE5 标准对应**：\n\n| SP 通道 | UE5 Material 输入 | 命名 | sRGB | 压缩 |\n|---------|-------------------|------|------|------|\n| Base Color | Base Color | `xxx_BaseColor.png` | sRGB | BC7 / ASTC 6×6 |\n| Normal OpenGL | Normal | `xxx_Normal.png` | Linear | BC5 / ASTC 6×6 |\n| Metallic | ORM (B) | 打包到 ORM | Linear | BC7 / ASTC 8×8 |\n| Roughness | ORM (G) | 打包到 ORM | Linear | BC7 / ASTC 8×8 |\n| Ambient Occlusion | ORM (R) | 打包到 ORM | Linear | BC7 / ASTC 8×8 |\n| Emissive | Emissive Color | `xxx_Emissive.png` | sRGB | BC7 |\n\n**UE5 ORM 通道顺序**（重要）：\n- R = Occlusion (AO)\n- G = Roughness（不需要反转）\n- B = Metallic\n- A = 空闲或 Height\n\n**SP Export Preset 配置**：\n- 在 SP 里新建 Export Preset，选 UE5 模板\n- 把 AO / Roughness / Metallic 打包到一张 `xxx_ORM.png`\n- SP 内置 Channel Packing 节点，自动按 UE5 顺序打包\n\n**Material 配置**：\n- Material Editor 里放 Texture Sample 节点引用 ORM 贴图\n- 拆 R/G/B 分别连到 AO / Roughness / Metallic\n- BaseColor 连 Base Color，Normal 连 Normal\n- 或用 Material Function 封装 Substance 贴图组\n\n**自动化**：\n- UE5 Asset Import Delegate 识别 `_BaseColor`/`_Normal`/`_ORM` 命名\n- 自动配置 sRGB、Compression、MipMap\n- 自动生成 Material 并连好节点（需自定义 UAssetTools 扩展）\n\n**Tangent Space**：\n- SP 默认 OpenGL 切线空间（Y+）\n- UE5 默认 OpenGL 切线空间（Y+）\n- 导 DirectX 选项时法线 Y 反转，会导致法线错误\n\n**和 Unity 对比**：Unity URP 用 Mask Map（R=Metallic, A=Smoothness，需反转 Roughness）；UE5 用 ORM（R=AO, G=Roughness, B=Metallic），不需反转，SP 导出 Preset 模板不同。\n\n**面试加分点**：能讲清 SP 的 `Normal Map Format`（OpenGL vs DirectX）对 UE5 法线 Y 轴的影响，以及 UE5 `Flip Normal Channel G` 选项。",
+      "tags": [
+        "SubstancePainter",
+        "UE5",
+        "ORM",
+        "PBR",
+        "导出"
+      ]
+    },
+    {
+      "id": "texture_019",
+      "category": "texture",
+      "difficulty": "hard",
+      "question": "贴图通道打包（Channel Packing）有哪些最佳实践？",
+      "answer": "**最佳实践**：\n\n1. **通道选择**：\n   - 每个通道存独立的单通道数据（metallic、roughness、AO 等）\n   - RGB 三个通道各放一个，A 放一个\n   - 共 4 通道，最多 4 个数据贴图合一\n\n2. **分辨率匹配**：\n   - 合并的贴图必须**分辨率需求相同**\n   - Metallic / AO / Roughness 通常同分辨率 → 适合合并\n   - 高频细节贴图（如 Detail Normal）不能合并\n\n3. **颜色空间**：\n   - 打包后的贴图**必须用 Linear**（sRGB 关闭）\n   - 任何通道都不能 sRGB\n   - UE5 Texture 属性 `sRGB = false`\n\n4. **UE5 通道顺序约定 ORM**：\n   - **R = Occlusion (AO)**\n   - **G = Roughness**\n   - **B = Metallic**\n   - A = 空闲（可放 Height / Detail Mask）\n   - UE5 全 Material 默认用 ORM，不需要反转 Roughness\n\n5. **预处理**：\n   - UE5 的 Roughness 直接用，不需要反转成 Smoothness\n   - 如果美术给的是 Smoothness，打包时反转：`Roughness = 1 - Smoothness`\n   - 在 SP Export Preset 里反转，避免运行时计算\n\n6. **压缩格式**：\n   - UE5 用 `CompressionSettings = TC_Masks`（每通道独立压缩）\n   - PC：BC7\n   - 移动：ASTC 8×8（数据贴图容差大）\n\n7. **工具**：\n   - **Substance Designer**：节点化打包，内置 UE5 模板\n   - **Photoshop**：手动合并通道\n   - **Python 脚本**：批量打包（PIL / numpy）\n\n**Python 示例**：\n```python\nfrom PIL import Image\nimport numpy as np\n\ndef pack_orm_ue5(ao_path, rough_path, metal_path, out_path):\n    ao = np.array(Image.open(ao_path).convert('L'))\n    rough = np.array(Image.open(rough_path).convert('L'))\n    metal = np.array(Image.open(metal_path).convert('L'))\n    h, w = ao.shape\n    packed = np.zeros((h, w, 4), dtype=np.uint8)\n    packed[:,:,0] = ao       # R = AO (UE5 ORM)\n    packed[:,:,1] = rough    # G = Roughness\n    packed[:,:,2] = metal    # B = Metallic\n    packed[:,:,3] = 255      # A = unused\n    Image.fromarray(packed, 'RGBA').save(out_path)\n```\n\n**质量验证**：\n- 打包后用 ASTC 8×8 压缩\n- 检查每个通道是否清晰，无串扰\n- UE5 Material 里用 Texture Sample 查看 R/G/B 单通道\n\n**和 Unity 对比**：Unity URP 用 MRAO（R=Metallic, G=Roughness, B=AO）或 Mask Map（R=Metallic, A=Smoothness 需反转）；UE5 统一用 ORM（R=AO, G=Roughness, B=Metallic），更标准。\n\n**面试加分点**：能讲清 `TC_Masks` 压缩设置对单通道质量的优化，以及 ORM 贴图用 `sRGB=false` + `CompressionSettings=TC_Masks` 的组合是 UE5 数据贴图的标准配置。",
+      "tags": [
+        "ChannelPacking",
+        "ORM",
+        "优化",
+        "PBR",
+        "UE5"
+      ]
+    },
+    {
+      "id": "texture_020",
+      "category": "texture",
+      "difficulty": "hard",
+      "question": "如何用 Python 脚本批量给团队美术重置 UE5 贴图导入设置？",
+      "answer": "**目标**：根据命名规范和路径，自动应用导入设置，统一全项目贴图配置。\n\n**UE5 方案**：用 `unreal` Python 模块 + `UEditorAssetLibrary` + `UAssetTools`，替代 Unity 的 C# `AssetDatabase` + `TextureImporter`。\n\n**Python 脚本**：\n\n```python\nimport unreal\n\ndef batch_reset_textures(root_path='/Game/Art'):\n    # 获取所有贴图资产\n    assets = unreal.EditorAssetLibrary.list_assets(root_path, recursive=True)\n    \n    changed = 0\n    skipped = 0\n    report = []\n    \n    for path in assets:\n        texture = unreal.load_asset(path)\n        if not texture or not isinstance(texture, unreal.Texture2D):\n            skipped += 1\n            continue\n        \n        lower = path.lower()\n        modified = False\n        \n        # 1. 法线贴图\n        if '_normal' in lower or '_n.' in lower:\n            texture.set_editor_property('compression_settings',\n                unreal.TextureCompressionSettings.TC_NORMALMAP)\n            texture.set_editor_property('srgb', False)\n            texture.set_editor_property('mip_gen_settings',\n                unreal.TextureMipGenSettings.FROM_TEXTURE_GROUP)\n            modified = True\n        # 2. UI 贴图\n        elif '/ui/' in lower:\n            texture.set_editor_property('srgb', True)\n            texture.set_editor_property('mip_gen_settings',\n                unreal.TextureMipGenSettings.NO_MIPMAPS)\n            texture.set_editor_property('compression_settings',\n                unreal.TextureCompressionSettings.TC_EDITOR_ICON)\n            modified = True\n        # 3. 数据贴图（ORM / mask / roughness）\n        elif '_orm' in lower or '_mask' in lower or '_rough' in lower:\n            texture.set_editor_property('srgb', False)\n            texture.set_editor_property('compression_settings',\n                unreal.TextureCompressionSettings.TC_MASKS)\n            texture.set_editor_property('mip_gen_settings',\n                unreal.TextureMipGenSettings.FROM_TEXTURE_GROUP)\n            modified = True\n        # 4. 普通颜色贴图\n        else:\n            texture.set_editor_property('srgb', True)\n            texture.set_editor_property('compression_settings',\n                unreal.TextureCompressionSettings.TC_BC7)\n            modified = True\n        \n        # 平台设置：移动端 ASTC 6x6\n        platform_settings = texture.get_editor_property('platform_settings')\n        # 配置 Android / iOS 的 ASTC 压缩\n        \n        if modified:\n            texture.update_resource()  # 触发重新压缩\n            unreal.EditorAssetLibrary.save_asset(path)\n            changed += 1\n            report.append(f'[MOD] {path}')\n    \n    # 输出报告\n    print(f'Changed: {changed}, Skipped: {skipped}')\n    return report\n\n# 执行\nbatch_reset_textures('/Game/Art')\n```\n\n**集成方式**：\n- Editor Utility Widget 做可视化界面\n- 绑定到 Editor Toolbar 一键执行\n- CI 用 UAT 跑批处理\n\n**和 Unity 对比**：Unity 用 `AssetDatabase.FindAssets` + `TextureImporter`（C#）；UE5 用 `EditorAssetLibrary.list_assets` + `set_editor_property`（Python），更易上手，且原生集成 Editor Utility。\n\n**面试加分点**：能讲清 `UTexture2D::UpdateResource()` 触发重新压缩的机制，以及 `FTexturePlatformData` 管理各平台压缩格式的层级结构。",
+      "tags": [
+        "批量处理",
+        "Python",
+        "UE5",
+        "EditorAssetLibrary",
+        "工具"
+      ]
+    }
+  ]
+}
