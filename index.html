@@ -993,6 +993,9 @@
       <div class="stat-group">
         <div class="stat"><span class="num" id="stat-progress-pct">0%</span><span class="label">整体进度</span></div>
         <button class="stats-panel-btn" id="stats-panel-btn">📊 题目统计</button>
+        <button class="stats-panel-btn" id="export-btn" title="导出进度到文件，换设备时可导入恢复">📤 导出</button>
+        <button class="stats-panel-btn" id="import-btn" title="从导出的文件恢复进度">📥 导入</button>
+        <input type="file" id="import-file" accept=".json,application/json" style="display:none">
       </div>
     </div>
     <div class="progress-track">
@@ -1160,6 +1163,90 @@ function loadFavorites() {
 }
 function saveFavorites() {
   localStorage.setItem(FAV_KEY, JSON.stringify(favorites));
+}
+
+// ---- 进度导入/导出（跨设备同步）----
+function exportProgress() {
+  const data = {
+    version: 1,
+    app: "ta-interview-bank",
+    exportedAt: new Date().toISOString(),
+    progress: progress,
+    favorites: favorites,
+    theme: localStorage.getItem(THEME_KEY) || "aurora"
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  a.href = url;
+  a.download = "ta-interview-backup-" + d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + ".json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const pCnt = Object.keys(progress).length;
+  const fCnt = Object.keys(favorites).length;
+  showToast("已导出 " + pCnt + " 条进度、" + fCnt + " 个收藏", "success");
+}
+
+function importProgress(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let data;
+    try {
+      data = JSON.parse(e.target.result);
+    } catch (err) {
+      showToast("文件解析失败，不是合法的 JSON", "danger");
+      return;
+    }
+    if (!data || typeof data !== "object" || (!data.progress && !data.favorites)) {
+      showToast("文件格式不正确，不是有效的备份文件", "danger");
+      return;
+    }
+    const impProgress = data.progress || {};
+    const impFavorites = data.favorites || {};
+    const impTheme = data.theme;
+
+    // 合并策略：取较大值，不丢数据
+    let newP = 0;
+    for (const id in impProgress) {
+      const imp = impProgress[id];
+      const cur = progress[id];
+      if (!cur) {
+        progress[id] = { mastered: imp.mastered || 0, attempts: imp.attempts || 0, removed: !!imp.removed };
+        newP++;
+      } else {
+        progress[id] = {
+          mastered: Math.max(cur.mastered || 0, imp.mastered || 0),
+          attempts: Math.max(cur.attempts || 0, imp.attempts || 0),
+          removed: !!(cur.removed || imp.removed)
+        };
+      }
+    }
+    let newF = 0;
+    for (const id in impFavorites) {
+      if (!favorites[id]) { favorites[id] = true; newF++; }
+    }
+    if (impTheme) {
+      applyTheme(impTheme);
+      saveTheme(impTheme);
+    }
+    saveProgress();
+    saveFavorites();
+    rebuildActiveQuestions();
+    if (currentIdx >= activeQuestions.length) currentIdx = 0;
+    if (answerOpen) toggleAnswer();
+    renderQuestion(true);
+    updateStats();
+    if (spOpen) renderStatsPanel();
+    const msg = "导入完成：进度 +" + newP + "（共 " + Object.keys(progress).length + "），收藏 +" + newF + "（共 " + Object.keys(favorites).length + "）";
+    showToast(msg, "success", 4500);
+  };
+  reader.onerror = () => showToast("文件读取失败", "danger");
+  reader.readAsText(file);
 }
 function isFavorite(id) {
   return !!favorites[id];
@@ -1575,12 +1662,12 @@ function animateNumber(el, target) {
 
 // ---- Toast ----
 let toastTimer = null;
-function showToast(msg, type) {
+function showToast(msg, type, duration) {
   const t = $("toast");
   t.textContent = msg;
   t.className = "toast show" + (type ? " " + type : "");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.classList.remove("show"); }, 2200);
+  toastTimer = setTimeout(() => { t.classList.remove("show"); }, duration || 2200);
 }
 
 // ---- 完成画面 ----
@@ -1819,6 +1906,15 @@ function bindEvents() {
   $("reset-btn").addEventListener("click", resetProgress);
   $("reset-done-btn").addEventListener("click", resetProgress);
   $("retry-btn").addEventListener("click", loadBank);
+
+  // 导入/导出
+  $("export-btn").addEventListener("click", exportProgress);
+  $("import-btn").addEventListener("click", () => $("import-file").click());
+  $("import-file").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (f) importProgress(f);
+    e.target.value = ""; // 允许重复导入同一文件
+  });
 
   // 筛选按钮：事件委托（按钮动态生成）
   $("filter-group").addEventListener("click", (e) => {
